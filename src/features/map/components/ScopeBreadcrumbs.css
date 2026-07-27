@@ -1,0 +1,130 @@
+.scope-breadcrumbs {
+  position: fixed;
+  z-index: 44;
+  top: calc(var(--topbar-h) + 14px);
+  left: 212px;
+  max-width: min(620px, calc(100vw - 632px));
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 5px;
+  color: var(--ink-soft);
+  background: color-mix(in srgb, var(--paper-light) 95%, transparent);
+  border: 1px solid rgba(73, 58, 41, 0.18);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgba(65, 48, 31, 0.08);
+  backdrop-filter: blur(8px);
+}
+
+.scope-breadcrumbs button {
+  border: 0;
+  cursor: pointer;
+}
+
+.scope-breadcrumbs button:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.scope-breadcrumbs__back,
+.scope-breadcrumbs__home {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #665d51;
+  background: transparent;
+  border-radius: 3px;
+}
+
+.scope-breadcrumbs__back:not(:disabled):hover,
+.scope-breadcrumbs__home:not(:disabled):hover {
+  color: #a64032;
+  background: rgba(166, 64, 50, 0.08);
+}
+
+.scope-breadcrumbs__path {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0 7px;
+  overflow-x: auto;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.scope-breadcrumbs__path::-webkit-scrollbar {
+  display: none;
+}
+
+.scope-breadcrumbs__item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.scope-breadcrumbs__item button {
+  padding: 4px 5px;
+  color: #7a7063;
+  background: transparent;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.scope-breadcrumbs__item button:hover {
+  color: #a64032;
+  background: rgba(166, 64, 50, 0.07);
+}
+
+.scope-breadcrumbs__separator {
+  flex: 0 0 auto;
+  color: #aa9f90;
+}
+
+.scope-breadcrumbs__current {
+  padding: 4px 5px;
+  color: var(--ink);
+  font-family: 'Noto Serif SC', serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+}
+
+.scope-breadcrumbs__depth {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: #948879;
+  border-left: 1px solid rgba(73, 58, 41, 0.13);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+  .scope-breadcrumbs {
+    top: calc(var(--topbar-h) + 10px);
+    right: 10px;
+    left: 10px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .scope-breadcrumbs__depth {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scope-breadcrumbs,
+  .scope-breadcrumbs * {
+    scroll-behavior: auto;
+    transition: none;
+  }
+}

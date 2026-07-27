@@ -1,0 +1,20 @@
+name: 功能建议
+description: 提议新的产品能力、内容类型或技术改动
+title: "[Feature] "
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 用户目标
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 数据、交互与兼容性影响

@@ -1,0 +1,48 @@
+{
+  "name": "knowledge-map",
+  "private": true,
+  "version": "0.1.0",
+  "description": "支持前置关系、标签场域、连续语义缩放与学习进度的互动数学知识地图。",
+  "license": "Apache-2.0",
+  "author": "Enmani",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Enmani/knowledge-map.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Enmani/knowledge-map/issues"
+  },
+  "homepage": "https://github.com/Enmani/knowledge-map#readme",
+  "keywords": [
+    "mathematics",
+    "knowledge-graph",
+    "semantic-zoom",
+    "education",
+    "pixijs"
+  ],
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test:smoke": "node src/engine/smoke-test.mjs && node src/frontier/smoke-test.mjs",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "d3-interpolate": "^3.0.1",
+    "lucide-react": "^1.26.0",
+    "pixi.js": "^8.19.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.4",
+    "@types/d3-interpolate": "^3.0.4",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  }
+}
