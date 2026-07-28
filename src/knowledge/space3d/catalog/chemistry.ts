@@ -219,7 +219,7 @@ const chemistryCatalog = buildCatalog([
   {
     id: 'environmental-chemistry', title: '环境化学', englishTitle: 'Environmental Chemistry',
     summary: '研究化学物质在大气、水体、土壤和生物圈中的来源、转化、迁移与归宿。',
-    primaryDomain: 'chemistry', domains: ['chemistry', 'biology'], tags: ['环境', '系统'], level: 3, strict: ['analytical-chemistry', 'chemical-equilibrium'], recommended: ['chemical-kinetics', 'ecology'],
+    primaryDomain: 'chemistry', domains: ['chemistry', 'biology', 'earth-environmental'], tags: ['环境', '系统'], level: 3, strict: ['analytical-chemistry', 'chemical-equilibrium'], recommended: ['chemical-kinetics', 'ecology'],
   },
   {
     id: 'green-sustainable-chemistry', title: '绿色与可持续化学', englishTitle: 'Green & Sustainable Chemistry',
@@ -229,7 +229,7 @@ const chemistryCatalog = buildCatalog([
   {
     id: 'computational-chemistry', title: '计算化学', englishTitle: 'Computational Chemistry',
     summary: '用电子结构计算、分子模拟和数值模型预测化学体系的结构、性质和反应。',
-    primaryDomain: 'chemistry', domains: ['chemistry', 'mathematics', 'physics'], tags: ['计算方法', '建模'], level: 4, strict: ['quantum-chemistry', 'physical-chemistry'], recommended: ['linear-algebra', 'optimization', 'statistics'],
+    primaryDomain: 'chemistry', domains: ['chemistry', 'mathematics', 'physics', 'computer-science'], tags: ['计算方法', '建模'], level: 4, strict: ['quantum-chemistry', 'physical-chemistry'], recommended: ['linear-algebra', 'optimization', 'statistics'],
   },
 ] as const)
 

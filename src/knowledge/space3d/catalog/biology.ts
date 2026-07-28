@@ -154,7 +154,7 @@ const biologyCatalog = buildCatalog([
   {
     id: 'ecology', title: '生态学', englishTitle: 'Ecology',
     summary: '研究生物与环境在种群、群落和生态系统中的关系。',
-    primaryDomain: 'biology', tags: ['网络', '系统'], level: 2, importance: 1.1, recommended: ['evolution'],
+    primaryDomain: 'biology', domains: ['biology', 'earth-environmental'], tags: ['网络', '系统'], level: 2, importance: 1.1, recommended: ['evolution'],
   },
   {
     id: 'population-ecology', title: '种群生态学', englishTitle: 'Population Ecology',
@@ -169,7 +169,7 @@ const biologyCatalog = buildCatalog([
   {
     id: 'ecosystem-ecology', title: '生态系统生态学', englishTitle: 'Ecosystem Ecology',
     summary: '研究能量流、物质循环及生物与非生物环境的耦合。',
-    primaryDomain: 'biology', domains: ['biology', 'physics', 'chemistry'], tags: ['生态', '能量', '系统'], level: 3, importance: 1.1, strict: ['ecology', 'energy'],
+    primaryDomain: 'biology', domains: ['biology', 'physics', 'chemistry', 'earth-environmental'], tags: ['生态', '能量', '系统'], level: 3, importance: 1.1, strict: ['ecology', 'energy'],
   },
   {
     id: 'biogeography', title: '生物地理学', englishTitle: 'Biogeography',
@@ -204,7 +204,7 @@ const biologyCatalog = buildCatalog([
   {
     id: 'bioinformatics', title: '生物信息学', englishTitle: 'Bioinformatics',
     summary: '用算法、统计和数据库管理并分析生命信息。',
-    primaryDomain: 'biology', domains: ['biology', 'mathematics'], tags: ['数据', '计算方法'], level: 3, importance: 1.15, strict: ['molecular-biology'], recommended: ['statistics'],
+    primaryDomain: 'biology', domains: ['biology', 'mathematics', 'computer-science'], tags: ['数据', '计算方法'], level: 3, importance: 1.15, strict: ['molecular-biology'], recommended: ['statistics'],
   },
   {
     id: 'systems-biology', title: '系统生物学', englishTitle: 'Systems Biology',
@@ -214,7 +214,7 @@ const biologyCatalog = buildCatalog([
   {
     id: 'computational-biology', title: '计算生物学', englishTitle: 'Computational Biology',
     summary: '用算法、模拟和统计模型解释生物系统及多尺度数据。',
-    primaryDomain: 'biology', domains: ['biology', 'mathematics'], tags: ['数据', '计算方法', '建模'], level: 4, importance: 1.15, strict: ['bioinformatics', 'statistics'],
+    primaryDomain: 'biology', domains: ['biology', 'mathematics', 'computer-science'], tags: ['数据', '计算方法', '建模'], level: 4, importance: 1.15, strict: ['bioinformatics', 'statistics'],
   },
   {
     id: 'biostatistics', title: '生物统计学', englishTitle: 'Biostatistics',

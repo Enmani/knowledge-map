@@ -361,18 +361,20 @@ function App() {
   const selectedSpaceDomain = selectedSpaceNode ? scienceDomainById[selectedSpaceNode.primaryDomain] : null
   const activeLens = getKnowledgeLens(activeLensId)
   const activeSpaceFilterDomain = spaceDomainFilter ? scienceDomainById[spaceDomainFilter] : null
-  const spaceProjection = useMemo(() => projectKnowledgeSpace(activeLensId, {
-    domainFilter: spaceDomainFilter,
-    filterMode: spaceDomainFilter ? spaceDomainFilterMode : 'none',
-  }), [activeLensId, spaceDomainFilter, spaceDomainFilterMode])
+  const spaceProjection = useMemo(() => mapViewMode === 'space3d'
+    ? projectKnowledgeSpace(activeLensId, {
+        domainFilter: spaceDomainFilter,
+        filterMode: spaceDomainFilter ? spaceDomainFilterMode : 'none',
+      })
+    : null, [activeLensId, mapViewMode, spaceDomainFilter, spaceDomainFilterMode])
   const selectedSpaceProjection = selectedSpaceNodeId && !activeSpaceSubspace
-    ? spaceProjection.nodes.find((projected) => projected.node.id === selectedSpaceNodeId) ?? null
+    ? spaceProjection?.nodes.find((projected) => projected.node.id === selectedSpaceNodeId) ?? null
     : null
   const visibleSpaceNodeIds = useMemo(
     () => activeSpaceSubspace
       ? new Set(activeSpaceSubspace.nodes.map(({ node }) => node.id))
       : new Set(
-        spaceProjection.nodes
+        (spaceProjection?.nodes ?? [])
           .filter((node) => node.visible && node.interactive)
           .map((node) => node.node.id),
       ),
@@ -1428,10 +1430,10 @@ function App() {
           </div>
           <p className="space-filter-explanation">
             {!activeSpaceFilterDomain
-              ? '完整知识球保留公共基准排列。'
+              ? '完整知识空间保留关系驱动的公共基准排列。'
               : spaceDomainFilterMode === 'temporary'
                 ? `仅显示${activeSpaceFilterDomain.label}相关知识，节点保持公共坐标。`
-                : `${activeSpaceFilterDomain.label}节点重新分配球面方向，基础半径保持稳定。`}
+                : `${activeSpaceFilterDomain.label}节点重新利用可见空间，基础—专业化半径保持稳定。`}
           </p>
           <span className="sr-only" aria-live="polite">
             {activeSpaceFilterDomain ? `已${spaceDomainFilterMode === 'focus' ? '聚焦' : '筛选'}${activeSpaceFilterDomain.label}` : '已显示全部领域'}
@@ -1491,7 +1493,7 @@ function App() {
           <Suspense fallback={<div className="space-loading">正在建立公共知识空间…</div>}>
             <ThreeKnowledgeSurface
               ref={threeSurfaceRef}
-              projection={spaceProjection}
+              projection={spaceProjection!}
               cardFocus={spaceCardFocus}
               selectedNodeId={selectedSpaceNodeId && visibleSpaceNodeIds.has(selectedSpaceNodeId) ? selectedSpaceNodeId : null}
               walkingMode={spaceWalkingMode}
@@ -1758,7 +1760,7 @@ function App() {
                 ? '内部节点随父节点的屏幕投影尺寸连续显现，空间位置锚定在微积分节点附近。'
                 : activeLens.description}</p>
               {selectedSpaceProjection && (
-                <p>前置深度 {selectedSpaceProjection.knowledgeDepth} · 球心距离 {selectedSpaceProjection.radius.toFixed(1)}</p>
+                <p>前置深度 {selectedSpaceProjection.knowledgeDepth} · 基础—专业化半径 {selectedSpaceProjection.radius.toFixed(1)}</p>
               )}
             </div>
           </div>
@@ -1804,8 +1806,8 @@ function App() {
           <div className="space-public-note">
             <strong>{activeSpaceSubspace ? '子域知识记录' : '公共知识记录'}</strong>
             <p>{activeSpaceSubspace
-              ? '微积分内部节点沿前置关系排列。缩小镜头后，子域逐渐收起并恢复公共知识球。'
-              : '此位置来自公开透镜投影。切换视角会改变空间邻近关系，知识点身份和关系数据保持一致。'}</p>
+              ? '微积分内部节点沿前置关系排列。缩小镜头后，子域逐渐收起并恢复公共知识空间。'
+              : '此位置来自关系驱动的公共投影。切换视角会改变相机与视觉强调，公共坐标、知识点身份和关系数据保持一致。'}</p>
           </div>
           </aside>
         </SideWorkbench>

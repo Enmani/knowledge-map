@@ -2,7 +2,7 @@
   "name": "knowledge-map",
   "private": true,
   "version": "0.1.0",
-  "description": "连接数学、物理、化学和生物的二维知识地图与三维公共知识空间。",
+  "description": "连接数学、物理、化学、生物、计算机科学、地球与环境科学的二维知识地图与三维公共知识空间。",
   "license": "Apache-2.0",
   "author": "Enmani",
   "repository": {
@@ -22,7 +22,10 @@
     "threejs",
     "physics",
     "chemistry",
-    "biology"
+    "biology",
+    "computer-science",
+    "earth-science",
+    "environmental-science"
   ],
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

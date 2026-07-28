@@ -1,4 +1,10 @@
-export type ScienceDomainId = 'mathematics' | 'physics' | 'chemistry' | 'biology'
+export type ScienceDomainId =
+  | 'mathematics'
+  | 'physics'
+  | 'chemistry'
+  | 'biology'
+  | 'computer-science'
+  | 'earth-environmental'
 
 export type KnowledgeLensId =
   | 'world'
@@ -6,6 +12,8 @@ export type KnowledgeLensId =
   | 'physics'
   | 'chemistry'
   | 'biology'
+  | 'computer-science'
+  | 'earth-environmental'
   | 'bridges'
 
 export type KnowledgeRelationType =
@@ -69,7 +77,7 @@ export interface ProjectedKnowledgeNode {
   emphasis: number
   /** Longest strict-prerequisite depth, calibrated by the canonical level. */
   knowledgeDepth: number
-  /** Stable semantic distance from the center of the public knowledge sphere. */
+  /** Stable foundation-to-specialization distance from the public-space center. */
   radius: number
   /** Hidden filtered nodes remain in the projection only to preserve renderer identity. */
   visible: boolean

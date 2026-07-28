@@ -21,9 +21,11 @@ const CROSS_DOMAIN_MEMBERSHIP: Readonly<Record<string, readonly ScienceDomainId[
   stochastic: ['mathematics', 'physics', 'biology'],
   'numerical-analysis': ['mathematics', 'physics'],
   optimization: ['mathematics', 'physics'],
+  'theory-of-computation': ['mathematics', 'computer-science'],
+  algorithms: ['mathematics', 'computer-science'],
   'game-theory': ['mathematics', 'biology'],
   'mathematical-modeling': ['mathematics', 'physics', 'chemistry', 'biology'],
-  'machine-learning': ['mathematics', 'biology'],
+  'machine-learning': ['mathematics', 'biology', 'computer-science'],
   'control-theory': ['mathematics', 'physics', 'biology'],
   'math-physics': ['mathematics', 'physics'],
 }

@@ -1,5 +1,10 @@
 import { knowledgeSpaceEdges, knowledgeSpaceNodes, scienceDomains } from './data'
 import { knowledgeLenses } from './lenses'
+import {
+  buildSemanticKnowledgeLayout,
+  poincareDistance,
+  type SemanticKnowledgeLayout,
+} from './semanticLayout'
 import type {
   KnowledgeLensDefinition,
   KnowledgeLensId,
@@ -18,9 +23,16 @@ import type {
   SpaceVector3,
 } from './types'
 
-const DOMAIN_ORDER: readonly ScienceDomainId[] = ['mathematics', 'physics', 'chemistry', 'biology']
+export const SCIENCE_DOMAIN_ORDER: readonly ScienceDomainId[] = [
+  'mathematics',
+  'physics',
+  'chemistry',
+  'biology',
+  'computer-science',
+  'earth-environmental',
+]
 const DEFAULT_COLLISION_PADDING = 0.18
-const DEFAULT_RELAXATION_ITERATIONS = 48
+const DEFAULT_RELAXATION_ITERATIONS = 32
 export const KNOWLEDGE_NODE_COLLISION_RADIUS = 0.78
 const MAX_PACKING_PASSES = 120
 const FOCUS_SLOT_COUNT = 4096
@@ -33,16 +45,6 @@ export const DEFAULT_KNOWLEDGE_SPHERE: Readonly<KnowledgeSphereParameters> = {
   radialGamma: 0.82,
   radialJitter: 0.16,
   globalAnchorWeight: 0.28,
-}
-
-const INV_SQRT_3 = 1 / Math.sqrt(3)
-
-/** Equal-angle vertices of a regular tetrahedron. */
-export const TETRAHEDRAL_DOMAIN_DIRECTIONS: Readonly<Record<ScienceDomainId, SpaceVector3>> = {
-  mathematics: [INV_SQRT_3, INV_SQRT_3, INV_SQRT_3],
-  physics: [INV_SQRT_3, -INV_SQRT_3, -INV_SQRT_3],
-  chemistry: [-INV_SQRT_3, INV_SQRT_3, -INV_SQRT_3],
-  biology: [-INV_SQRT_3, -INV_SQRT_3, INV_SQRT_3],
 }
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value))
@@ -90,12 +92,14 @@ const fibonacciDirection = (index: number, count: number, phase: number): SpaceV
   return [Math.cos(angle) * radius, y, Math.sin(angle) * radius]
 }
 
-const defaultDataset = (): KnowledgeSpaceDataset => ({
+const DEFAULT_DATASET: KnowledgeSpaceDataset = {
   domains: scienceDomains,
   nodes: knowledgeSpaceNodes,
   edges: knowledgeSpaceEdges,
   lenses: knowledgeLenses,
-})
+}
+
+const defaultDataset = (): KnowledgeSpaceDataset => DEFAULT_DATASET
 
 const findLens = (dataset: KnowledgeSpaceDataset, lensId: KnowledgeLensId) => {
   const lens = dataset.lenses.find((candidate) => candidate.id === lensId)
@@ -182,30 +186,39 @@ const sphereParameters = (options: ProjectionOptions): KnowledgeSphereParameters
   }
 }
 
-const nodeRadius = (
-  node: KnowledgeSpaceNode,
-  depth: number,
+const semanticLayoutCache = new WeakMap<KnowledgeSpaceDataset, Map<string, SemanticKnowledgeLayout>>()
+const publicGeometryCache = new WeakMap<SemanticKnowledgeLayout, Map<string, readonly SpaceVector3[]>>()
+
+const semanticLayoutFor = (
+  dataset: KnowledgeSpaceDataset,
+  depthById: ReadonlyMap<string, number>,
   maxDepth: number,
   sphere: KnowledgeSphereParameters,
+  fallbackNodeIds: ReadonlySet<string>,
 ) => {
-  const normalizedDepth = clamp01(depth / Math.max(1, maxDepth))
-  const semanticRadius = sphere.coreRadius
-    + (sphere.outerRadius - sphere.coreRadius) * normalizedDepth ** sphere.radialGamma
-  return semanticRadius + stableSigned(`${node.id}:radial`) * sphere.radialJitter
+  const sphereKey = JSON.stringify(sphere)
+  const datasetCache = semanticLayoutCache.get(dataset) ?? new Map<string, SemanticKnowledgeLayout>()
+  semanticLayoutCache.set(dataset, datasetCache)
+  const cached = datasetCache.get(sphereKey)
+  if (cached) return cached
+  const layout = buildSemanticKnowledgeLayout(dataset, depthById, maxDepth, sphere, fallbackNodeIds)
+  datasetCache.set(sphereKey, layout)
+  return layout
 }
 
-const domainDirection = (node: KnowledgeSpaceNode): SpaceVector3 => {
-  let total: SpaceVector3 = [0, 0, 0]
-  node.domains.forEach((domain) => {
-    const weight = domain === node.primaryDomain ? 1 : 0.68
-    total = add(total, multiply(TETRAHEDRAL_DOMAIN_DIRECTIONS[domain], weight))
-  })
-  const tagDirection = node.tags.reduce<SpaceVector3>(
-    (sum, tag) => add(sum, stableUnitVector(`tag:${tag}`)),
-    [0, 0, 0],
-  )
-  total = add(total, multiply(normalize(tagDirection, stableUnitVector(node.id)), 0.16))
-  return normalize(total, stableUnitVector(node.id))
+const cachedPublicGeometry = (
+  semanticLayout: SemanticKnowledgeLayout,
+  cacheKey: string,
+) => publicGeometryCache.get(semanticLayout)?.get(cacheKey)
+
+const cachePublicGeometry = (
+  semanticLayout: SemanticKnowledgeLayout,
+  cacheKey: string,
+  nodes: readonly ProjectedKnowledgeNode[],
+) => {
+  const layoutCache = publicGeometryCache.get(semanticLayout) ?? new Map<string, readonly SpaceVector3[]>()
+  publicGeometryCache.set(semanticLayout, layoutCache)
+  layoutCache.set(cacheKey, nodes.map((node) => node.position))
 }
 
 interface FocusMembership {
@@ -405,49 +418,38 @@ const forEachNearbyPair = (
   })
 }
 
-/** Three-dimensional constrained relaxation with tangential semantic forces. */
-const relaxKnowledgeSphere = (
+const canonicalLayoutScale = (node: KnowledgeSpaceNode) => {
+  const importance = node.importance ?? 1
+  const emphasis = clamp01(0.68 + (importance - 0.8) * 0.45)
+  return 0.92 + emphasis * 0.13
+}
+
+/** Three-dimensional constrained relaxation over the relationship-derived semantic embedding. */
+const relaxSemanticLayout = (
   input: readonly ProjectedKnowledgeNode[],
   targetDirections: ReadonlyMap<string, SpaceVector3>,
-  lens: KnowledgeLensDefinition,
-  dataset: KnowledgeSpaceDataset,
+  semanticLayout: SemanticKnowledgeLayout,
   padding: number,
   iterations: number,
 ): readonly ProjectedKnowledgeNode[] => {
   const nodes: MutableProjectedNode[] = input.map((item) => ({ ...item, position: [...item.position] }))
-  const indexById = new Map(nodes.map((item, index) => [item.node.id, index]))
-  const tagSets = nodes.map((item) => new Set(item.node.tags))
-  const tagPairs: [number, number, number][] = []
-  for (let leftIndex = 0; leftIndex < nodes.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < nodes.length; rightIndex += 1) {
-      let sharedTags = 0
-      tagSets[leftIndex].forEach((tag) => {
-        if (tagSets[rightIndex].has(tag)) sharedTags += 1
-      })
-      if (sharedTags) tagPairs.push([leftIndex, rightIndex, sharedTags])
-    }
-  }
   const collisionCellSize = KNOWLEDGE_NODE_COLLISION_RADIUS * 2.5 + padding
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
     const forces: [number, number, number][] = nodes.map(() => [0, 0, 0])
 
-    dataset.edges.forEach((edge) => {
-      const sourceIndex = indexById.get(edge.source)
-      const targetIndex = indexById.get(edge.target)
-      if (sourceIndex === undefined || targetIndex === undefined) return
-      const source = nodes[sourceIndex]
-      const target = nodes[targetIndex]
-      if (!source.visible || !target.visible) return
+    semanticLayout.stressPairs.forEach((pair) => {
+      const source = nodes[pair.leftIndex]
+      const target = nodes[pair.rightIndex]
+      if (!source?.visible || !target?.visible) return
       const delta = subtract(target.position, source.position)
       const distance = Math.max(EPSILON, length(delta))
-      const desired = Math.abs(source.radius - target.radius) + 2.7
-      if (distance <= desired) return
-      const relationWeight = lens.relationWeights[edge.type]
-      const magnitude = (distance - desired) * edge.strength * relationWeight * 0.012
+      const semanticDistance = poincareDistance(source.position, target.position, semanticLayout.poincareBoundary)
+      const stress = clamp(semanticDistance - pair.targetDistance, -1.4, 1.4)
+      const magnitude = stress * pair.weight * 0.055
       const direction = multiply(delta, magnitude / distance)
-      addForce(forces, sourceIndex, tangentComponent(direction, normalize(source.position)))
-      addForce(forces, targetIndex, tangentComponent(multiply(direction, -1), normalize(target.position)))
+      addForce(forces, pair.leftIndex, tangentComponent(direction, normalize(source.position)))
+      addForce(forces, pair.rightIndex, tangentComponent(multiply(direction, -1), normalize(target.position)))
     })
 
     forEachNearbyPair(nodes, collisionCellSize, (leftIndex, rightIndex) => {
@@ -455,10 +457,12 @@ const relaxKnowledgeSphere = (
         const right = nodes[rightIndex]
         const delta = subtract(right.position, left.position)
         let distance = length(delta)
-        let unit = distance > EPSILON ? multiply(delta, 1 / distance) : stableUnitVector(`${left.node.id}:${right.node.id}`)
+        const unit = distance > EPSILON ? multiply(delta, 1 / distance) : stableUnitVector(`${left.node.id}:${right.node.id}`)
         if (distance <= EPSILON) distance = EPSILON
 
-        const minimum = KNOWLEDGE_NODE_COLLISION_RADIUS * (left.scale + right.scale) + padding
+        const minimum = KNOWLEDGE_NODE_COLLISION_RADIUS
+          * (canonicalLayoutScale(left.node) + canonicalLayoutScale(right.node))
+          + padding
         if (distance < minimum) {
           const repulsion = multiply(unit, (minimum - distance) * 0.72)
           addForce(forces, leftIndex, multiply(repulsion, -1))
@@ -466,26 +470,12 @@ const relaxKnowledgeSphere = (
         }
     })
 
-    tagPairs.forEach(([leftIndex, rightIndex, sharedTags]) => {
-      const left = nodes[leftIndex]
-      const right = nodes[rightIndex]
-      if (!left.visible || !right.visible) return
-      const delta = subtract(right.position, left.position)
-      const distance = Math.max(EPSILON, length(delta))
-      const minimum = KNOWLEDGE_NODE_COLLISION_RADIUS * (left.scale + right.scale) + padding
-      if (distance <= minimum * 1.35) return
-      const unit = multiply(delta, 1 / distance)
-      const attraction = multiply(unit, Math.min(0.055, sharedTags * 0.009 * (distance - minimum)))
-      addForce(forces, leftIndex, tangentComponent(attraction, normalize(left.position)))
-      addForce(forces, rightIndex, tangentComponent(multiply(attraction, -1), normalize(right.position)))
-    })
-
     nodes.forEach((node, index) => {
       if (!node.visible) return
       const radialUnit = normalize(node.position, targetDirections.get(node.node.id))
       const targetDirection = targetDirections.get(node.node.id) ?? radialUnit
       const angularError = tangentComponent(subtract(targetDirection, radialUnit), radialUnit)
-      addForce(forces, index, multiply(angularError, 0.12))
+      addForce(forces, index, multiply(angularError, 0.075))
       addForce(forces, index, multiply(radialUnit, (node.radius - length(node.position)) * 0.22))
     })
 
@@ -513,7 +503,9 @@ const relaxKnowledgeSphere = (
       const right = nodes[rightIndex]
       const delta = subtract(right.position, left.position)
       const distance = length(delta)
-      const minimum = KNOWLEDGE_NODE_COLLISION_RADIUS * (left.scale + right.scale) + padding
+      const minimum = KNOWLEDGE_NODE_COLLISION_RADIUS
+        * (canonicalLayoutScale(left.node) + canonicalLayoutScale(right.node))
+        + padding
       const overlap = minimum - distance
       if (overlap <= 0) return
       maximumOverlap = Math.max(maximumOverlap, overlap)
@@ -640,6 +632,25 @@ const projectionVisibility = (
   return 'hidden' as const
 }
 
+const lensWithProjectedCamera = (
+  lens: KnowledgeLensDefinition,
+  nodes: readonly ProjectedKnowledgeNode[],
+): KnowledgeLensDefinition => {
+  if (lens.focusDomains.length !== 1) return lens
+  const focusDomain = lens.focusDomains[0]
+  const members = nodes.filter(({ node }) => node.domains.includes(focusDomain))
+  if (!members.length) return lens
+  const centroid = members.reduce<SpaceVector3>((sum, item) => add(
+    sum,
+    multiply(item.position, item.node.primaryDomain === focusDomain ? 1 : 0.58),
+  ), [0, 0, 0])
+  if (length(centroid) <= EPSILON) return lens
+  return {
+    ...lens,
+    cameraPosition: multiply(normalize(centroid), length(lens.cameraPosition)),
+  }
+}
+
 export const projectKnowledgeDataset = (
   dataset: KnowledgeSpaceDataset,
   lensId: KnowledgeLensId,
@@ -659,7 +670,14 @@ export const projectKnowledgeDataset = (
   const redistributeFocus = options.focus ?? (options.filterMode === 'focus' ? domainFocus : undefined)
   const temporaryFilter = Boolean(domainFocus && options.filterMode === 'temporary' && !options.focus)
   const membership = resolveFocusMembership(dataset, effectiveFocus)
-  const globalDirections = new Map(dataset.nodes.map((node) => [node.id, domainDirection(node)]))
+  const semanticLayout = semanticLayoutFor(
+    dataset,
+    depths.depthById,
+    depths.maxDepth,
+    sphere,
+    depths.fallbackNodeIds,
+  )
+  const globalDirections = new Map(semanticLayout.nodes.map((node) => [node.nodeId, node.direction]))
   const targetDirections = focusTargetDirections(
     dataset,
     membership,
@@ -672,7 +690,7 @@ export const projectKnowledgeDataset = (
   const crossDomainNodes = crossDomainIncidentNodes(dataset)
 
   const rawNodes = dataset.nodes.map((node): ProjectedKnowledgeNode => {
-    const radius = nodeRadius(node, depths.depthById.get(node.id) ?? node.level, depths.maxDepth, sphere)
+    const radius = semanticLayout.nodeById.get(node.id)?.radius ?? sphere.outerRadius
     const direction = targetDirections.get(node.id) ?? globalDirections.get(node.id) ?? stableUnitVector(node.id)
     const visibility = projectionVisibility(node.id, effectiveFocus, membership)
     const visible = visibility !== 'hidden'
@@ -699,14 +717,24 @@ export const projectKnowledgeDataset = (
     }
   })
 
-  const relaxedNodes = relaxKnowledgeSphere(
-    rawNodes,
-    targetDirections,
-    lens,
-    dataset,
-    options.collisionPadding ?? DEFAULT_COLLISION_PADDING,
-    options.relaxationIterations ?? DEFAULT_RELAXATION_ITERATIONS,
-  )
+  const collisionPadding = options.collisionPadding ?? DEFAULT_COLLISION_PADDING
+  const relaxationIterations = options.relaxationIterations ?? DEFAULT_RELAXATION_ITERATIONS
+  const geometryCacheKey = `${collisionPadding}:${relaxationIterations}`
+  const cachedGeometry = redistributeFocus
+    ? undefined
+    : cachedPublicGeometry(semanticLayout, geometryCacheKey)
+  const relaxedNodes = cachedGeometry
+    ? rawNodes.map((node, index): ProjectedKnowledgeNode => ({ ...node, position: cachedGeometry[index] }))
+    : relaxSemanticLayout(
+        rawNodes,
+        targetDirections,
+        semanticLayout,
+        collisionPadding,
+        relaxationIterations,
+      )
+  if (!redistributeFocus && !cachedGeometry) {
+    cachePublicGeometry(semanticLayout, geometryCacheKey, relaxedNodes)
+  }
   const nodes = temporaryFilter
     ? relaxedNodes.map((item): ProjectedKnowledgeNode => {
         const visibility = projectionVisibility(item.node.id, effectiveFocus, membership)
@@ -722,6 +750,7 @@ export const projectKnowledgeDataset = (
       })
     : relaxedNodes
   const projectedById = new Map(nodes.map((item) => [item.node.id, item]))
+  const projectedLens = lensWithProjectedCamera(lens, nodes)
   const edges: readonly ProjectedKnowledgeEdge[] = dataset.edges.map((edge) => {
     const source = projectedById.get(edge.source)
     const target = projectedById.get(edge.target)
@@ -735,7 +764,7 @@ export const projectKnowledgeDataset = (
         : 0,
     }
   })
-  return { lens, sphere, nodes, edges, fields: projectFields(dataset, nodes, lens) }
+  return { lens: projectedLens, sphere, nodes, edges, fields: projectFields(dataset, nodes, projectedLens) }
 }
 
 const publicProjectionCache = new Map<string, KnowledgeSpaceProjection>()
@@ -831,7 +860,7 @@ export const validateKnowledgeSpaceDataset = (
     if (domainIds.has(domain.id)) errors.push(`Duplicate domain id: ${domain.id}`)
     domainIds.add(domain.id)
   })
-  DOMAIN_ORDER.forEach((domain) => { if (!domainIds.has(domain)) errors.push(`Missing required domain: ${domain}`) })
+  SCIENCE_DOMAIN_ORDER.forEach((domain) => { if (!domainIds.has(domain)) errors.push(`Missing required domain: ${domain}`) })
   dataset.nodes.forEach((node) => {
     if (nodeIds.has(node.id)) errors.push(`Duplicate node id: ${node.id}`)
     nodeIds.add(node.id)
@@ -856,7 +885,7 @@ export const validateKnowledgeSpaceDataset = (
   dataset.lenses.forEach((lens) => {
     if (lensIds.has(lens.id)) errors.push(`Duplicate lens id: ${lens.id}`)
     lensIds.add(lens.id)
-    DOMAIN_ORDER.forEach((domain) => {
+    SCIENCE_DOMAIN_ORDER.forEach((domain) => {
       const weight = lens.domainWeights[domain]
       if (!Number.isFinite(weight) || weight < 0 || weight > 1) errors.push(`Lens ${lens.id} has invalid ${domain} weight`)
     })
@@ -866,7 +895,7 @@ export const validateKnowledgeSpaceDataset = (
       if (!Number.isFinite(weight) || weight < 0 || weight > 1) errors.push(`Lens ${lens.id} has invalid ${relation} weight`)
     })
   })
-  const requiredLenses: readonly KnowledgeLensId[] = ['world', 'mathematics', 'physics', 'chemistry', 'biology', 'bridges']
+  const requiredLenses: readonly KnowledgeLensId[] = ['world', ...SCIENCE_DOMAIN_ORDER, 'bridges']
   requiredLenses.forEach((lens) => { if (!lensIds.has(lens)) errors.push(`Missing required lens: ${lens}`) })
   const nodeById = new Map(dataset.nodes.map((node) => [node.id, node]))
   const crossDomainEdges = dataset.edges.filter((edge) => {
@@ -876,7 +905,7 @@ export const validateKnowledgeSpaceDataset = (
   }).length
   const domainCounts = new Map<ScienceDomainId, number>()
   dataset.nodes.forEach((node) => domainCounts.set(node.primaryDomain, (domainCounts.get(node.primaryDomain) ?? 0) + 1))
-  DOMAIN_ORDER.forEach((domain) => { if ((domainCounts.get(domain) ?? 0) < 8) warnings.push(`Domain ${domain} has fewer than 8 primary nodes`) })
+  SCIENCE_DOMAIN_ORDER.forEach((domain) => { if ((domainCounts.get(domain) ?? 0) < 8) warnings.push(`Domain ${domain} has fewer than 8 primary nodes`) })
   if (crossDomainEdges < 10) warnings.push('Fewer than 10 explicit cross-domain edges')
   return {
     valid: errors.length === 0,

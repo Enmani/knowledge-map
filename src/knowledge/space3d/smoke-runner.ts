@@ -2,13 +2,14 @@ import {
   computeKnowledgeDepths,
   interpolateKnowledgeProjections,
   knowledgeLenses,
+  projectKnowledgeDataset,
   projectKnowledgeSpace,
   publicKnowledgeSpace,
   KNOWLEDGE_NODE_COLLISION_RADIUS,
-  TETRAHEDRAL_DOMAIN_DIRECTIONS,
+  SCIENCE_DOMAIN_ORDER,
   validateKnowledgeSpaceDataset,
 } from './index'
-import type { KnowledgeSpaceDataset, KnowledgeSpaceNode, ScienceDomainId } from './types'
+import type { KnowledgeSpaceDataset, KnowledgeSpaceNode } from './types'
 import {
   MAX_GLOBAL_ZOOM,
   MIN_GLOBAL_ZOOM,
@@ -65,15 +66,15 @@ function assert(condition: unknown, message: string): asserts condition {
 const validation = validateKnowledgeSpaceDataset(publicKnowledgeSpace)
 assert(validation.valid, `三维知识数据校验失败：${validation.errors.join('；')}`)
 assert(validation.warnings.length === 0, `三维知识数据存在警告：${validation.warnings.join('；')}`)
-assert(validation.stats.domains === 4, '公共知识空间应包含四个理科领域。')
-assert(validation.stats.nodes === 184, '公共知识空间应包含 184 个主节点。')
-for (const domain of ['mathematics', 'physics', 'chemistry', 'biology'] as const) {
+assert(validation.stats.domains === 6, '公共知识空间应包含六个理科领域。')
+assert(validation.stats.nodes === 276, '公共知识空间应包含 276 个主节点。')
+for (const domain of SCIENCE_DOMAIN_ORDER) {
   assert(publicKnowledgeSpace.nodes.filter((node) => node.primaryDomain === domain).length === 46, `领域 ${domain} 应包含 46 个主节点。`)
 }
-assert(validation.stats.edges >= 300, '公共知识空间应包含足够的前置与跨域关系。')
-assert(validation.stats.lenses === 6, '公共知识空间应提供六个公共透镜。')
-assert(validation.stats.crossDomainNodes >= 20, '公共知识空间应包含足够的多领域桥接节点。')
-assert(validation.stats.crossDomainEdges >= 30, '公共知识空间应包含足够的跨领域关系。')
+assert(validation.stats.edges === 799, '公共知识空间应包含 799 条前置与跨域关系。')
+assert(validation.stats.lenses === 8, '公共知识空间应提供八个公共透镜。')
+assert(validation.stats.crossDomainNodes === 196, '公共知识空间应包含 196 个多领域桥接节点。')
+assert(validation.stats.crossDomainEdges === 246, '公共知识空间应包含 246 条跨主领域关系。')
 
 for (const lens of knowledgeLenses) {
   const first = projectKnowledgeSpace(lens.id)
@@ -98,16 +99,7 @@ for (const lens of knowledgeLenses) {
 
 const world = projectKnowledgeSpace('world')
 const biology = projectKnowledgeSpace('biology')
-
-const domainIds: readonly ScienceDomainId[] = ['mathematics', 'physics', 'chemistry', 'biology']
-for (let leftIndex = 0; leftIndex < domainIds.length; leftIndex += 1) {
-  for (let rightIndex = leftIndex + 1; rightIndex < domainIds.length; rightIndex += 1) {
-    const left = TETRAHEDRAL_DOMAIN_DIRECTIONS[domainIds[leftIndex]]
-    const right = TETRAHEDRAL_DOMAIN_DIRECTIONS[domainIds[rightIndex]]
-    const pairDot = left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
-    assert(Math.abs(pairDot + 1 / 3) < 1e-12, '四个领域方向必须构成正四面体。')
-  }
-}
+assert(world.fields.filter((field) => field.kind === 'tag').length === 90, '公共投影应生成 90 个自动标签场。')
 
 const axisSpans = [0, 1, 2].map((axis) => {
   const values = world.nodes.map((node) => node.position[axis])
@@ -115,7 +107,75 @@ const axisSpans = [0, 1, 2].map((axis) => {
 })
 assert(axisSpans[2] >= Math.max(axisSpans[0], axisSpans[1]) * 0.68, '公共全景应具有显著 Z 轴体积，不能退化为二维平面。')
 
+const spatialDistance = (left: (typeof world.nodes)[number], right: (typeof world.nodes)[number]) => Math.hypot(
+  right.position[0] - left.position[0],
+  right.position[1] - left.position[1],
+  right.position[2] - left.position[2],
+)
+const median = (values: readonly number[]) => [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)]
+const worldById = new Map(world.nodes.map((node) => [node.node.id, node]))
+const relatedPairIds = new Set(publicKnowledgeSpace.edges.map((edge) => [edge.source, edge.target].sort().join('|')))
+const strongRelationDistances = publicKnowledgeSpace.edges
+  .filter((edge) => edge.strength >= 0.78)
+  .map((edge) => spatialDistance(worldById.get(edge.source)!, worldById.get(edge.target)!))
+const unrelatedDistances: number[] = []
+for (let leftIndex = 0; leftIndex < world.nodes.length; leftIndex += 1) {
+  for (let rightIndex = leftIndex + 1; rightIndex < world.nodes.length; rightIndex += 1) {
+    const pairId = [world.nodes[leftIndex].node.id, world.nodes[rightIndex].node.id].sort().join('|')
+    if (!relatedPairIds.has(pairId) && (leftIndex * 277 + rightIndex) % 19 === 0) {
+      unrelatedDistances.push(spatialDistance(world.nodes[leftIndex], world.nodes[rightIndex]))
+    }
+  }
+}
+assert(
+  median(strongRelationDistances) < median(unrelatedDistances) * 0.55,
+  '强知识关系的典型空间距离应显著短于无直接关系节点。',
+)
+const causalNodes = Array.from({ length: 10 }, (_, index): KnowledgeSpaceNode => ({
+  id: `causal-${index}`,
+  title: `causal-${index}`,
+  englishTitle: `causal-${index}`,
+  summary: `causal-${index}`,
+  primaryDomain: 'mathematics',
+  domains: ['mathematics'],
+  tags: [`causal-tag-${index}`],
+  level: 1,
+}))
+const causalBaselineDataset: KnowledgeSpaceDataset = {
+  ...publicKnowledgeSpace,
+  nodes: causalNodes,
+  edges: [],
+}
+const causalRelatedDataset: KnowledgeSpaceDataset = {
+  ...causalBaselineDataset,
+  edges: [{
+    id: 'causal-strong-relation',
+    source: 'causal-0',
+    target: 'causal-1',
+    type: 'shared-model',
+    strength: 1,
+  }],
+}
+const causalBaseline = projectKnowledgeDataset(causalBaselineDataset, 'world', { relaxationIterations: 16 })
+const causalRelated = projectKnowledgeDataset(causalRelatedDataset, 'world', { relaxationIterations: 16 })
+assert(
+  spatialDistance(causalRelated.nodes[0], causalRelated.nodes[1])
+    < spatialDistance(causalBaseline.nodes[0], causalBaseline.nodes[1]) * 0.8,
+  '在同领域同半径对照中加入强关系后，目标节点应显著靠近。',
+)
+SCIENCE_DOMAIN_ORDER.forEach((domain) => {
+  const members = world.nodes.filter((node) => node.node.primaryDomain === domain)
+  const sameDomainNearest = members.filter((member) => {
+    const nearest = world.nodes
+      .filter((candidate) => candidate.node.id !== member.node.id)
+      .sort((left, right) => spatialDistance(member, left) - spatialDistance(member, right))[0]
+    return nearest.node.primaryDomain === domain
+  }).length
+  assert(sameDomainNearest / members.length > 0.25, `领域 ${domain} 应形成可辨认的柔性空间聚集。`)
+})
+
 const radiiByDepth = new Map<number, number[]>()
+const projectedByNodeId = new Map(world.nodes.map((node) => [node.node.id, node]))
 world.nodes.forEach((node) => {
   radiiByDepth.set(node.knowledgeDepth, [...(radiiByDepth.get(node.knowledgeDepth) ?? []), node.radius])
   assert(Math.abs(Math.hypot(...node.position) - node.radius) < 1e-6, `节点 ${node.node.id} 必须保持知识半径。`)
@@ -123,9 +183,17 @@ world.nodes.forEach((node) => {
 const meanRadiusByDepth = [...radiiByDepth.entries()]
   .map(([depth, radii]) => [depth, radii.reduce((sum, radius) => sum + radius, 0) / radii.length] as const)
   .sort(([left], [right]) => left - right)
-for (let index = 1; index < meanRadiusByDepth.length; index += 1) {
-  assert(meanRadiusByDepth[index][1] > meanRadiusByDepth[index - 1][1], '知识半径应随前置深度总体严格递增。')
-}
+assert(
+  meanRadiusByDepth.at(-1)![1] > meanRadiusByDepth[0][1],
+  '最深层知识的平均基础—专业化半径应大于根层。',
+)
+publicKnowledgeSpace.edges
+  .filter((edge) => edge.type === 'prerequisite' && edge.prerequisiteKind !== 'recommended')
+  .forEach((edge) => {
+    const source = projectedByNodeId.get(edge.source)
+    const target = projectedByNodeId.get(edge.target)
+    assert(source && target && target.radius > source.radius, `严格前置 ${edge.id} 必须保持由内向外。`)
+  })
 
 let minimumCollisionGap = Number.POSITIVE_INFINITY
 for (let leftIndex = 0; leftIndex < world.nodes.length; leftIndex += 1) {
@@ -146,6 +214,10 @@ for (const lens of knowledgeLenses) {
   const projection = projectKnowledgeSpace(lens.id)
   projection.nodes.forEach((node, index) => {
     assert(Math.abs(node.radius - world.nodes[index].radius) < 1e-9, `透镜 ${lens.id} 不应改变知识半径。`)
+    assert(
+      node.position.every((value, axis) => value === world.nodes[index].position[axis]),
+      `透镜 ${lens.id} 不应改变关系驱动的公共坐标。`,
+    )
   })
 }
 
@@ -154,15 +226,15 @@ const focusedMath = projectKnowledgeSpace('world', { domainFilter: 'mathematics'
 const focusedMathAgain = projectKnowledgeSpace('world', { domainFilter: 'mathematics', filterMode: 'focus' })
 assert(temporaryMath.nodes.some((node) => !node.visible), '临时领域筛选应隐藏不匹配节点。')
 temporaryMath.nodes.forEach((node, index) => {
-  assert(node.position.every((value, axis) => value === world.nodes[index].position[axis]), '临时筛选不得重排公共球体。')
+  assert(node.position.every((value, axis) => value === world.nodes[index].position[axis]), '临时筛选不得重排公共语义布局。')
   if (!node.visible) assert(node.opacity === 0 && !node.interactive, '临时筛选隐藏节点必须退出显示与命中。')
 })
 assert(focusedMath.nodes.some((node) => node.visibility === 'prerequisite' || node.visibility === 'bridge'), '专业聚焦应保留必要前置或跨域桥梁。')
 assert(focusedMath.nodes.some((node) => node.visibility === 'hidden'), '专业聚焦应隐藏无关节点。')
-assert(focusedMath.nodes.some((node, index) => node.visible && node.position.some((value, axis) => Math.abs(value - world.nodes[index].position[axis]) > 0.1)), '专业聚焦应重新分配球面空间。')
+assert(focusedMath.nodes.some((node, index) => node.visible && node.position.some((value, axis) => Math.abs(value - world.nodes[index].position[axis]) > 0.1)), '专业聚焦应重新利用可见空间。')
 focusedMath.nodes.forEach((node, index) => {
   assert(node.position.every((value, axis) => value === focusedMathAgain.nodes[index].position[axis]), '专业聚焦结果必须确定。')
-  assert(Math.abs(node.radius - world.nodes[index].radius) < 1e-9, '专业聚焦不得改变知识深度半径。')
+  assert(Math.abs(node.radius - world.nodes[index].radius) < 1e-9, '专业聚焦不得改变基础—专业化半径。')
   if (!node.visible) assert(node.opacity === 0 && !node.interactive, '专业聚焦隐藏节点必须退出显示与命中。')
 })
 
@@ -178,6 +250,14 @@ const cyclicDataset: KnowledgeSpaceDataset = {
 }
 const cyclicDepths = computeKnowledgeDepths(cyclicDataset)
 assert(cyclicDepths.fallbackNodeIds.has('functions') && cyclicDepths.fallbackNodeIds.has('calculus'), '前置环应确定性回退到人工 level。')
+const cyclicProjection = projectKnowledgeDataset(cyclicDataset, 'world', { relaxationIterations: 0 })
+const cyclicFunction = cyclicProjection.nodes.find(({ node }) => node.id === 'functions')!
+const cyclicCalculus = cyclicProjection.nodes.find(({ node }) => node.id === 'calculus')!
+assert(
+  cyclicFunction.radius < cyclicProjection.sphere.outerRadius - 0.5
+    && cyclicCalculus.radius < cyclicProjection.sphere.outerRadius - 0.5,
+  '前置环的投影半径应保留 level 回退结果，不得被顺序约束推到最外层。',
+)
 
 const depthNode = (id: string, level: KnowledgeSpaceNode['level']): KnowledgeSpaceNode => ({
   id,
@@ -369,4 +449,4 @@ assert(
   '实时 LOD 调度必须以降级快于升级的非对称驻留限制评估、保持和单轮换位。',
 )
 
-console.log(`3D knowledge sphere smoke test passed: ${validation.stats.nodes} nodes, ${validation.stats.edges} edges, ${validation.stats.crossDomainNodes} cross-domain nodes, ${validation.stats.crossDomainEdges} cross-domain edges, ${world.fields.filter((field) => field.kind === 'tag').length} tag fields, ${world.fields.reduce((sum, field) => sum + field.lobes.length, 0)} field lobes, spans ${axisSpans.map((value) => value.toFixed(1)).join('×')}, collision gap ${minimumCollisionGap.toFixed(3)}.`)
+console.log(`3D semantic knowledge layout smoke test passed: ${validation.stats.nodes} nodes, ${validation.stats.edges} edges, ${validation.stats.crossDomainNodes} cross-domain nodes, ${validation.stats.crossDomainEdges} cross-domain edges, ${world.fields.filter((field) => field.kind === 'tag').length} tag fields, ${world.fields.reduce((sum, field) => sum + field.lobes.length, 0)} field lobes, spans ${axisSpans.map((value) => value.toFixed(1)).join('×')}, collision gap ${minimumCollisionGap.toFixed(3)}.`)

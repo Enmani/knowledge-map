@@ -129,7 +129,7 @@ const physicsCatalog = buildCatalog([
   {
     id: 'quantum-information', title: '量子信息科学', englishTitle: 'Quantum Information Science',
     summary: '以叠加、纠缠和量子测量研究信息处理、通信、传感与计算。',
-    primaryDomain: 'physics', domains: ['physics', 'mathematics'], tags: ['信息', '不确定性', '计算方法'], level: 4, importance: 1.15, strict: ['quantum-mechanics', 'linear-algebra'], recommended: ['quantum-optics'],
+    primaryDomain: 'physics', domains: ['physics', 'mathematics', 'computer-science'], tags: ['信息', '不确定性', '计算方法'], level: 4, importance: 1.15, strict: ['quantum-mechanics', 'linear-algebra'], recommended: ['quantum-optics'],
   },
   {
     id: 'ultracold-quantum-matter', title: '超冷量子物质', englishTitle: 'Ultracold Quantum Matter',
