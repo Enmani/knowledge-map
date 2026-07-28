@@ -7,6 +7,8 @@ export {
   getFrontierEntryBySlug,
   getFrontierSourceById,
   getFrontierSourcesForEntry,
+  isDefaultFrontierEntry,
+  isPublicFrontierEntry,
   prepareFrontierEntries,
   queryFrontierEntries,
   sortFrontierEntries,

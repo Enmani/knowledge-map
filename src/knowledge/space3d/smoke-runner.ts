@@ -22,13 +22,41 @@ import {
 import {
   createSubspaceRevealRange,
   parentScopeWeight,
+  shouldEnterSubspaceScope,
+  shouldExitSubspaceScope,
+  subspaceCardCenter,
+  subspaceEntryZoom,
   subspaceRevealProgress,
 } from '../../renderers/three/subspaceLod'
 import { calculusThreeSubspace } from '../../features/space3d/calculusSubspace'
 import {
+  HOVERED_NODE_VISUAL_SCALE,
+  NODE_DISPLAY_RENDER_ORDER,
   RELATED_NODE_LODS,
   RELATED_NODE_MIN_OPACITY,
+  resolveNodeDisplayPriority,
 } from '../../renderers/three/selectionFocus'
+import {
+  STABLE_LOD_DEMOTION_DWELL_MS,
+  STABLE_LOD_EVALUATION_INTERVAL_MS,
+  STABLE_LOD_MAX_SWAPS_PER_EVALUATION,
+  STABLE_LOD_MIN_HOLD_MS,
+  STABLE_LOD_PROMOTION_DWELL_MS,
+  STABLE_LOD_RETENTION_BONUS,
+  stableDesiredLod,
+  stableHemisphereEligibility,
+  stableLodChangeReady,
+  stableLodDetail,
+  stableLodLabelBudget,
+  stableLodMinimumEmphasis,
+  stableLodScore,
+} from '../../renderers/three/stableLod'
+import {
+  CARD_FOCUS_CONTEXT_OPACITY,
+  getCardFocusEdgeRole,
+  getCardFocusRole,
+  resolveCardFocusState,
+} from '../../renderers/core/cardFocus'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -202,6 +230,12 @@ assert(calculusThreeSubspace.ownerNodeId === 'calculus', '三维微积分子域�
 assert(calculusThreeSubspace.nodes.length === 6, '三维微积分子域应复用六个二维内部节点。')
 assert(calculusThreeSubspace.edges.length === 7, '三维微积分子域应复用七条前置关系。')
 assert(
+  calculusThreeSubspace.scopeEnterZoom === 12.45
+    && calculusThreeSubspace.scopeExitZoom === 8
+    && calculusThreeSubspace.scopeExitZoom < calculusThreeSubspace.scopeEnterZoom,
+  '三维微积分子域必须以 1245% 进入、800% 退出，并保持独立滞回区间。',
+)
+assert(
   calculusThreeSubspace.nodes.every(({ node, localPosition, scale }) => (
     node.id.startsWith('calculus:')
       && localPosition.every(Number.isFinite)
@@ -215,6 +249,36 @@ assert(
   '三维子域显隐应覆盖完整的连续区间。',
 )
 assert(parentScopeWeight(1) === 0, '三维子域完全显现后父域必须完全隐藏。')
+const childRotationCenter = subspaceCardCenter([
+  [2, -1, 4],
+  [4, 3, 0],
+  [6, 1, 2],
+], [9, 9, 9])
+assert(
+  childRotationCenter.every((value, axis) => value === [4, 1, 2][axis]),
+  '三维子域旋转中心必须取当前子域卡片世界坐标的算术中心。',
+)
+assert(
+  subspaceCardCenter([], [7, 8, 9]).every((value, axis) => value === [7, 8, 9][axis]),
+  '没有有效子域卡片时旋转中心必须回退到公共投影中心。',
+)
+assert(
+  subspaceEntryZoom(2, 310, 620, 12.45, MAX_GLOBAL_ZOOM) === 12.45,
+  '双击父节点必须至少把全局倍率推进到子域进入阈值。',
+)
+assert(
+  subspaceEntryZoom(100, 100, 620, 12.45, MAX_GLOBAL_ZOOM) === MAX_GLOBAL_ZOOM,
+  '双击进入子域的目标倍率不得超过全局倍率上限。',
+)
+assert(
+  !shouldEnterSubspaceScope(12.44, 1, 12.45)
+    && shouldEnterSubspaceScope(12.45, 0.8, 12.45),
+  '三维子域只能在实际倍率和显隐进度同时达到进入阈值后接管作用域。',
+)
+assert(
+  !shouldExitSubspaceScope(8.01, 8) && shouldExitSubspaceScope(8, 8),
+  '三维子域在 800% 以上必须保持作用域，达到 800% 时退出。',
+)
 const delayedReveal = createSubspaceRevealRange(800, 360, 620)
 assert(delayedReveal.startPx === 800 && delayedReveal.endPx === 1320, '高倍率首次触发子域时仍应保留连续展开区间。')
 assert(
@@ -222,5 +286,87 @@ assert(
   '三维直接关系邻居的 LOD 不得退化为光点。',
 )
 assert(RELATED_NODE_MIN_OPACITY === 0.88, '三维直接关系邻居必须保持稳定的最低透明度。')
+assert(
+  NODE_DISPLAY_RENDER_ORDER.hovered > NODE_DISPLAY_RENDER_ORDER.selected
+    && NODE_DISPLAY_RENDER_ORDER.selected > NODE_DISPLAY_RENDER_ORDER.default,
+  '三维卡片显示层级必须满足悬停高于选中、选中高于普通。',
+)
+assert(
+  resolveNodeDisplayPriority(true, false) === 'selected'
+    && resolveNodeDisplayPriority(true, true) === 'hovered'
+    && HOVERED_NODE_VISUAL_SCALE === 1.06,
+  '三维卡片悬停必须覆盖选中显示层并使用受控的轻微放大。',
+)
+assert(CARD_FOCUS_CONTEXT_OPACITY === 0.46, '二维与三维必须共享相同的关联聚焦淡化系数。')
+const selectedCardFocus = resolveCardFocusState({
+  allNodeIds: ['primary', 'related', 'context'],
+  primaryNodeIds: ['primary'],
+  relatedNodeIds: ['primary', 'related', 'missing'],
+})
+assert(getCardFocusRole(selectedCardFocus, 'primary') === 'primary', '主卡必须优先于重复的关联卡身份。')
+assert(getCardFocusRole(selectedCardFocus, 'related') === 'related', '关联卡必须保持共享高亮身份。')
+assert(getCardFocusRole(selectedCardFocus, 'context') === 'context', '未命中卡片必须进入低透明度上下文。')
+assert(getCardFocusEdgeRole(selectedCardFocus, 'primary', 'related') === 'connected', '焦点卡片之间的边必须高亮。')
+assert(getCardFocusEdgeRole(selectedCardFocus, 'related', 'context') === 'context', '离开焦点集合的边必须淡化。')
+const radarCardFocus = resolveCardFocusState({
+  allNodeIds: ['radar-a', 'radar-b', 'context'],
+  relatedNodeIds: ['radar-a', 'radar-b'],
+})
+assert(radarCardFocus.active && radarCardFocus.primaryNodeIds.size === 0, '前沿雷达必须支持没有主卡的批量命中聚焦。')
+assert(
+  getCardFocusRole(radarCardFocus, 'radar-a') === 'related'
+    && getCardFocusRole(radarCardFocus, 'context') === 'context',
+  '前沿雷达命中卡必须复用关联卡显示，其余卡片必须淡化。',
+)
+assert(
+  !resolveCardFocusState({ allNodeIds: ['visible'], relatedNodeIds: ['missing'] }).active,
+  '当前画布没有命中卡片时不得把整张地图错误淡化。',
+)
+assert(
+  stableLodDetail([18]) === 0
+    && stableLodDetail([72]) === 1
+    && stableLodMinimumEmphasis(0) === 0.7
+    && stableLodMinimumEmphasis(1) === 0,
+  '稳定 LOD 必须在远景提高语义门槛，并在近景向全部可见节点开放。',
+)
+assert(
+  stableLodLabelBudget(1600, 900, 1) > stableLodLabelBudget(1600, 900, 0),
+  '稳定 LOD 的文字卡名额必须随近景细节等级增加。',
+)
+assert(
+  stableLodScore({ emphasis: 0.9, hemisphere: -1, projectedHeight: 10, detail: 0, hiddenForMs: 0 })
+    > stableLodScore({ emphasis: 0.4, hemisphere: 1, projectedHeight: 100, detail: 0, hiddenForMs: 0 }),
+  '远景稳定 LOD 必须让语义重要度主导正面程度和投影尺寸。',
+)
+assert(
+  !stableHemisphereEligibility(false, -0.1)
+    && stableHemisphereEligibility(false, 0)
+    && stableHemisphereEligibility(true, -0.2)
+    && !stableHemisphereEligibility(true, -0.31),
+  '半球候选资格必须使用独立的进入与退出阈值。',
+)
+assert(
+  stableDesiredLod(27, 'glow') === 'glow'
+    && stableDesiredLod(28, 'glow') === 'title'
+    && stableDesiredLod(20, 'title') === 'title'
+    && stableDesiredLod(19, 'title') === 'glow'
+    && stableDesiredLod(70, 'title') === 'card'
+    && stableDesiredLod(54, 'card') === 'card'
+    && stableDesiredLod(53, 'card') === 'title',
+  '卡片、标题和光点必须使用成对的 LOD 进入/退出阈值。',
+)
+assert(
+  STABLE_LOD_EVALUATION_INTERVAL_MS === 80
+    && STABLE_LOD_PROMOTION_DWELL_MS === 140
+    && STABLE_LOD_DEMOTION_DWELL_MS === 80
+    && STABLE_LOD_MIN_HOLD_MS === 180
+    && STABLE_LOD_RETENTION_BONUS === 0.08
+    && STABLE_LOD_MAX_SWAPS_PER_EVALUATION === 4
+    && !stableLodChangeReady(179, 0, 0, true)
+    && stableLodChangeReady(180, 0, 100, true)
+    && !stableLodChangeReady(239, 0, 100, false)
+    && stableLodChangeReady(240, 0, 100, false),
+  '实时 LOD 调度必须以降级快于升级的非对称驻留限制评估、保持和单轮换位。',
+)
 
 console.log(`3D knowledge sphere smoke test passed: ${validation.stats.nodes} nodes, ${validation.stats.edges} edges, ${validation.stats.crossDomainNodes} cross-domain nodes, ${validation.stats.crossDomainEdges} cross-domain edges, ${world.fields.filter((field) => field.kind === 'tag').length} tag fields, ${world.fields.reduce((sum, field) => sum + field.lobes.length, 0)} field lobes, spans ${axisSpans.map((value) => value.toFixed(1)).join('×')}, collision gap ${minimumCollisionGap.toFixed(3)}.`)

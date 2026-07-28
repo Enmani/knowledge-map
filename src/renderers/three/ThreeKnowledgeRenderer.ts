@@ -41,11 +41,18 @@ import type {
   ScienceDomainDefinition,
 } from '../../knowledge/space3d/types'
 import {
+  CARD_FOCUS_CONTEXT_OPACITY,
+  getCardFocusEdgeRole,
+  getCardFocusRole,
+  type CardFocusState,
+} from '../core/cardFocus'
+import {
   createKnowledgeCardTexture,
   createKnowledgeTitleTexture,
   createNodeGlowTexture,
 } from './cardTexture'
 import {
+  MAX_GLOBAL_ZOOM,
   dampGlobalZoom,
   globalZoomPercent,
   isGlobalZoomSettled,
@@ -57,12 +64,34 @@ import {
   SUBSPACE_SCOPE_EXIT_PROGRESS,
   createSubspaceRevealRange,
   parentScopeWeight,
+  shouldEnterSubspaceScope,
+  shouldExitSubspaceScope,
+  subspaceCardCenter,
+  subspaceEntryZoom,
   subspaceRevealProgress,
 } from './subspaceLod'
 import {
+  HOVERED_NODE_VISUAL_SCALE,
+  NODE_DISPLAY_RENDER_ORDER,
   RELATED_NODE_LODS,
   RELATED_NODE_MIN_OPACITY,
+  resolveNodeDisplayPriority,
+  type NodeDisplayPriority,
 } from './selectionFocus'
+import {
+  STABLE_LOD_EVALUATION_INTERVAL_MS,
+  STABLE_LOD_MAX_SWAPS_PER_EVALUATION,
+  STABLE_LOD_RETENTION_BONUS,
+  stableDesiredLod,
+  stableHemisphereEligibility,
+  stableLodChangeReady,
+  stableLodDetail,
+  stableLodLabelBudget,
+  stableLodMinimumEmphasis,
+  stableLodScore,
+  stableLodScoreAlpha,
+  type StableNodeLod,
+} from './stableLod'
 import type {
   SpaceColorTheme,
   ThreeKnowledgeCameraState,
@@ -78,8 +107,6 @@ const TITLE_HEIGHT = 0.8
 const GLOW_SIZE = 0.68
 const CLICK_MOVEMENT_LIMIT = 6
 const SETTLE_EPSILON = 0.0015
-const FAR_LOD_MAX_PX = 24
-const TITLE_LOD_MAX_PX = 62
 const HIDDEN_OPACITY_EPSILON = 0.001
 const LABEL_COLLISION_PADDING_PX = 5
 const HOVER_LABEL_WIDTH_PX = 168
@@ -93,7 +120,7 @@ const FIELD_RENDER_SCALE = 0.42
 
 const WALK_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE'])
 
-type NodeLod = 'glow' | 'title' | 'card'
+type NodeLod = StableNodeLod
 
 interface NodeRuntime {
   id: string
@@ -122,6 +149,13 @@ interface NodeRuntime {
   currentVisualHeight: number
   targetVisualWidth: number
   targetVisualHeight: number
+  currentHoverScale: number
+  stableLodScore: number
+  stableLodChangedAt: number
+  stableLodCandidate: NodeLod | null
+  stableLodCandidateSince: number
+  labelHiddenSince: number
+  hemisphereEligible: boolean
 }
 
 interface EdgeRuntime {
@@ -164,6 +198,7 @@ interface PointerGesture {
   button: number
   mode: 'pan' | 'rotate'
   rotationPivot: Vector3 | null
+  pressedNodeId: string | null
   startX: number
   startY: number
   lastX: number
@@ -232,11 +267,11 @@ function edgeColor(edge: ProjectedKnowledgeEdge): string {
   }
 }
 
-function displayEdgeOpacity(edge: ProjectedKnowledgeEdge, selectedNodeId: string | null): number {
+function displayEdgeOpacity(edge: ProjectedKnowledgeEdge, cardFocus: CardFocusState): number {
   const base = edge.opacity * 0.24
-  if (!selectedNodeId) return base
-  const connected = edge.edge.source === selectedNodeId || edge.edge.target === selectedNodeId
-  return connected ? Math.min(0.72, 0.2 + edge.opacity * 0.62) : base * 0.12
+  const role = getCardFocusEdgeRole(cardFocus, edge.edge.source, edge.edge.target)
+  if (role === 'default') return base
+  return role === 'connected' ? Math.min(0.72, 0.2 + edge.opacity * 0.62) : base * 0.12
 }
 
 function displayFieldOpacity(field: ProjectedKnowledgeField): number {
@@ -362,10 +397,13 @@ export class ThreeKnowledgeRenderer {
   private readonly movementKeys = new Set<string>()
   private callbacks: ThreeKnowledgeRendererCallbacks
   private selectedNodeId: string | null
+  private cardFocus: CardFocusState
   private projection: KnowledgeSpaceProjection
   private hasPresentedProjection = false
   private frameRequest: number | null = null
   private lastFrameTime = 0
+  private lastLodEvaluationTime = Number.NEGATIVE_INFINITY
+  private lastLodScoreTime = Number.NEGATIVE_INFINITY
   private pointerGesture: PointerGesture | null = null
   private pointerInside = false
   private hoverPointer: { clientX: number; clientY: number } | null = null
@@ -391,6 +429,8 @@ export class ThreeKnowledgeRenderer {
     this.callbacks = options
     this.projection = options.projection
     this.selectedNodeId = options.selectedNodeId ?? null
+    this.cardFocus = options.cardFocus
+    this.cardFocus.relatedNodeIds.forEach((nodeId) => this.selectedNeighborIds.add(nodeId))
     this.walkingMode = options.walkingMode ?? false
     this.fieldsVisible = options.fieldsVisible ?? true
     this.colorTheme = options.colorTheme ?? 'light'
@@ -405,7 +445,7 @@ export class ThreeKnowledgeRenderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, options.maxPixelRatio ?? 1.6))
     this.renderer.domElement.className = 'three-knowledge-canvas'
     this.renderer.domElement.tabIndex = 0
-    this.renderer.domElement.setAttribute('aria-label', '三维知识空间；拖拽平移，滚轮指针定点缩放，按住 Alt 拖拽或右键拖拽时围绕知识球心旋转，行走模式使用 WASD、Q 和 E')
+    this.renderer.domElement.setAttribute('aria-label', '三维知识空间；拖拽平移，滚轮指针定点缩放，按住 Alt 拖拽或右键拖拽时围绕当前作用域中心旋转，行走模式使用 WASD、Q 和 E')
     this.renderer.domElement.style.touchAction = 'none'
     this.renderer.domElement.style.display = 'block'
     this.renderer.domElement.style.width = '100%'
@@ -430,7 +470,7 @@ export class ThreeKnowledgeRenderer {
     this.edgeLayer.renderOrder = 1
     this.nodeLayer.renderOrder = 2
     this.hoverLabelSprite.visible = false
-    this.hoverLabelSprite.renderOrder = 20
+    this.hoverLabelSprite.renderOrder = 50
     this.hoverLabelSprite.frustumCulled = false
     this.hoverLabelSprite.raycast = () => undefined
     this.nodeLayer.add(this.hoverLabelSprite)
@@ -498,18 +538,31 @@ export class ThreeKnowledgeRenderer {
 
   setSelectedNodeId(nodeId: string | null) {
     if (nodeId === this.selectedNodeId) return
-    const previous = this.selectedNodeId
     this.selectedNodeId = nodeId
-    if (previous) this.refreshCardSelection(previous)
-    if (nodeId) this.refreshCardSelection(nodeId)
+    this.requestRender()
+  }
+
+  setCardFocusState(cardFocus: CardFocusState) {
+    const previousFocus = this.cardFocus
+    this.cardFocus = cardFocus
+    this.selectedNeighborIds.clear()
+    cardFocus.relatedNodeIds.forEach((nodeId) => this.selectedNeighborIds.add(nodeId))
+
+    for (const runtime of this.nodes.values()) {
+      const previousRole = getCardFocusRole(previousFocus, runtime.id)
+      const nextRole = getCardFocusRole(cardFocus, runtime.id)
+      if (previousRole === nextRole) continue
+      runtime.selected = nextRole === 'primary'
+      runtime.material.map = this.textureForLod(runtime, runtime.lod, runtime.selected)
+      runtime.material.needsUpdate = true
+    }
     for (const runtime of this.edges.values()) {
       const sourceVisible = this.nodes.get(runtime.sourceId)?.projection.visible === true
       const targetVisible = this.nodes.get(runtime.targetId)?.projection.visible === true
       runtime.targetOpacity = sourceVisible && targetVisible
-        ? displayEdgeOpacity(runtime.projection, nodeId)
+        ? displayEdgeOpacity(runtime.projection, cardFocus)
         : 0
     }
-    this.refreshSelectionNeighborhood()
     this.requestRender()
   }
 
@@ -556,7 +609,7 @@ export class ThreeKnowledgeRenderer {
       const endpointsVisible = visibleNodeIds.has(projected.edge.source)
         && visibleNodeIds.has(projected.edge.target)
       runtime.targetOpacity = endpointsVisible
-        ? displayEdgeOpacity(projected, this.selectedNodeId)
+        ? displayEdgeOpacity(projected, this.cardFocus)
         : 0
       if (snap) runtime.currentOpacity = runtime.targetOpacity
     }
@@ -565,7 +618,6 @@ export class ThreeKnowledgeRenderer {
       if (!activeEdgeIds.has(runtime.id)) runtime.targetOpacity = 0
     }
     this.updateSubspaceTargets(snap)
-    this.refreshSelectionNeighborhood()
 
     const activeFieldIds = new Set(projection.fields.map(({ id }) => id))
     for (const projected of projection.fields) {
@@ -674,6 +726,15 @@ export class ThreeKnowledgeRenderer {
       }
       if (!this.nodes.has(definition.ownerNodeId)) {
         throw new Error(`三维子域 ${definition.id} 缺少父节点：${definition.ownerNodeId}`)
+      }
+      if (
+        !Number.isFinite(definition.scopeEnterZoom)
+        || !Number.isFinite(definition.scopeExitZoom)
+        || definition.scopeExitZoom <= 0
+        || definition.scopeExitZoom >= definition.scopeEnterZoom
+        || definition.scopeEnterZoom > MAX_GLOBAL_ZOOM
+      ) {
+        throw new Error(`三维子域 ${definition.id} 的进入/退出倍率无效。`)
       }
       const runtime: SubspaceRuntime = {
         definition,
@@ -801,8 +862,21 @@ export class ThreeKnowledgeRenderer {
       : this.publicScopeWeight()
   }
 
-  private armSubspaceForWheel(nodeId: string | null, zoomingIn: boolean) {
-    if (!zoomingIn) return
+  private rotationPivotForActiveScope(): Vector3 {
+    if (!this.activeScopeId) return this.projectionCenter.clone()
+    const subspace = this.subspaces.get(this.activeScopeId)
+    if (!subspace) return this.projectionCenter.clone()
+    const positions = subspace.nodeIds.flatMap((nodeId) => {
+      const runtime = this.nodes.get(nodeId)
+      return runtime ? [toSpaceVector3(runtime.currentPosition)] : []
+    })
+    return toVector3(subspaceCardCenter(
+      positions,
+      toSpaceVector3(this.projectionCenter),
+    ))
+  }
+
+  private armSubspace(nodeId: string | null): SubspaceRuntime | null {
     const matched = [...this.subspaces.values()].find(
       ({ definition }) => definition.ownerNodeId === nodeId,
     )
@@ -828,6 +902,11 @@ export class ThreeKnowledgeRenderer {
         subspace.armed = false
       }
     }
+    return matched?.armed ? matched : null
+  }
+
+  private armSubspaceForWheel(nodeId: string | null, zoomingIn: boolean) {
+    if (zoomingIn) this.armSubspace(nodeId)
   }
 
   private updateSubspaceProgress(): boolean {
@@ -835,13 +914,21 @@ export class ThreeKnowledgeRenderer {
     for (const subspace of this.subspaces.values()) {
       const previousProgress = subspace.progress
       const owner = this.nodes.get(subspace.definition.ownerNodeId)
-      subspace.progress = subspace.armed && owner
+      const rawProgress = subspace.armed && owner
         ? subspaceRevealProgress(
           this.projectedCardHeight(owner),
           subspace.revealStartPx,
           subspace.revealEndPx,
         )
         : 0
+      const isActiveScope = this.activeScopeId === subspace.definition.id
+      const exitThresholdReached = isActiveScope && shouldExitSubspaceScope(
+        this.camera.zoom,
+        subspace.definition.scopeExitZoom,
+      )
+      subspace.progress = isActiveScope && !exitThresholdReached
+        ? Math.max(previousProgress, rawProgress)
+        : rawProgress
       if (subspace.progress > HIDDEN_OPACITY_EPSILON) subspace.hasRevealed = true
       if (
         subspace.hasRevealed
@@ -854,15 +941,16 @@ export class ThreeKnowledgeRenderer {
       if (Math.abs(previousProgress - subspace.progress) > 1e-5) moving = true
 
       if (
-        subspace.progress >= SUBSPACE_SCOPE_ENTER_PROGRESS
-        && this.activeScopeId !== subspace.definition.id
+        this.activeScopeId === null
+        && shouldEnterSubspaceScope(
+          this.camera.zoom,
+          subspace.progress,
+          subspace.definition.scopeEnterZoom,
+        )
       ) {
         this.activeScopeId = subspace.definition.id
         this.callbacks.onScopeChange?.(this.activeScopeId)
-      } else if (
-        this.activeScopeId === subspace.definition.id
-        && subspace.progress <= SUBSPACE_SCOPE_EXIT_PROGRESS
-      ) {
+      } else if (exitThresholdReached) {
         this.activeScopeId = null
         this.callbacks.onScopeChange?.(null)
       }
@@ -873,8 +961,9 @@ export class ThreeKnowledgeRenderer {
   private createNode(projected: ProjectedKnowledgeNode, subspaceId: string | null = null): NodeRuntime {
     const domain = this.domains.get(projected.node.primaryDomain)
     if (!domain) throw new Error(`三维知识空间缺少领域定义：${projected.node.primaryDomain}`)
-    const selected = projected.node.id === this.selectedNodeId
+    const selected = getCardFocusRole(this.cardFocus, projected.node.id) === 'primary'
     const initialLod: NodeLod = selected ? 'card' : 'glow'
+    const createdAt = performance.now()
     const cardTexture: Texture | null = null
     const selectedCardTexture = selected
       ? createKnowledgeCardTexture(projected.node, domain, true, this.colorTheme)
@@ -926,6 +1015,13 @@ export class ThreeKnowledgeRenderer {
       currentVisualHeight: initialHeight,
       targetVisualWidth: initialWidth,
       targetVisualHeight: initialHeight,
+      currentHoverScale: 1,
+      stableLodScore: projected.emphasis,
+      stableLodChangedAt: createdAt,
+      stableLodCandidate: null,
+      stableLodCandidateSince: createdAt,
+      labelHiddenSince: createdAt,
+      hemisphereEligible: true,
     }
     this.nodes.set(runtime.id, runtime)
     return runtime
@@ -939,7 +1035,7 @@ export class ThreeKnowledgeRenderer {
     const material = new LineBasicMaterial({
       color: new Color(edgeColor(projected)),
       transparent: true,
-      opacity: displayEdgeOpacity(projected, this.selectedNodeId),
+      opacity: displayEdgeOpacity(projected, this.cardFocus),
       depthWrite: false,
       depthTest: true,
       toneMapped: false,
@@ -956,8 +1052,8 @@ export class ThreeKnowledgeRenderer {
       line,
       material,
       projection: projected,
-      currentOpacity: displayEdgeOpacity(projected, this.selectedNodeId),
-      targetOpacity: displayEdgeOpacity(projected, this.selectedNodeId),
+      currentOpacity: displayEdgeOpacity(projected, this.cardFocus),
+      targetOpacity: displayEdgeOpacity(projected, this.cardFocus),
     }
     this.edges.set(runtime.id, runtime)
     return runtime
@@ -1083,20 +1179,13 @@ export class ThreeKnowledgeRenderer {
       && (runtime.currentOpacity > 0.002 || runtime.targetOpacity > 0.002)
   }
 
-  private refreshCardSelection(nodeId: string) {
-    const runtime = this.nodes.get(nodeId)
-    if (!runtime) return
-    const selected = nodeId === this.selectedNodeId
-    if (runtime.selected === selected) return
-    runtime.material.map = this.textureForLod(runtime, runtime.lod, selected)
-    runtime.material.needsUpdate = true
-    runtime.selected = selected
-  }
-
   private textureForLod(runtime: NodeRuntime, lod: NodeLod, selected: boolean): Texture {
     const domain = this.domains.get(runtime.projection.node.primaryDomain)
     if (!domain) throw new Error(`三维知识空间缺少领域定义：${runtime.projection.node.primaryDomain}`)
-    const related = !selected && this.selectedNeighborIds.has(runtime.id)
+    const related = !selected && (
+      this.selectedNeighborIds.has(runtime.id)
+      || runtime.id === this.hoveredNodeId
+    )
     if (lod === 'glow') {
       runtime.glowTexture ??= createNodeGlowTexture(domain.color)
       return runtime.glowTexture
@@ -1157,29 +1246,6 @@ export class ThreeKnowledgeRenderer {
     return runtime.cardTexture
   }
 
-  private refreshSelectionNeighborhood() {
-    const previousNeighborIds = new Set(this.selectedNeighborIds)
-    this.selectedNeighborIds.clear()
-    if (this.selectedNodeId) {
-      for (const edge of this.edges.values()) {
-        if (edge.targetOpacity <= HIDDEN_OPACITY_EPSILON) continue
-        if (this.scopeWeightForEdge(edge) <= HIDDEN_OPACITY_EPSILON) continue
-        if (edge.sourceId === this.selectedNodeId) this.selectedNeighborIds.add(edge.targetId)
-        if (edge.targetId === this.selectedNodeId) this.selectedNeighborIds.add(edge.sourceId)
-      }
-    }
-    const changedNodeIds = new Set([
-      ...previousNeighborIds,
-      ...this.selectedNeighborIds,
-    ])
-    for (const nodeId of changedNodeIds) {
-      const runtime = this.nodes.get(nodeId)
-      if (!runtime) continue
-      runtime.material.map = this.textureForLod(runtime, runtime.lod, runtime.selected)
-      runtime.material.needsUpdate = true
-    }
-  }
-
   private setNodeLod(runtime: NodeRuntime, lod: NodeLod) {
     if (runtime.lod === lod) return
     runtime.lod = lod
@@ -1210,15 +1276,40 @@ export class ThreeKnowledgeRenderer {
       / (2 * depth * Math.tan(MathUtils.degToRad(this.camera.fov * 0.5)))
   }
 
-  private desiredNodeLod(runtime: NodeRuntime): NodeLod {
-    const projectedHeight = this.projectedCardHeight(runtime)
-    return runtime.selected
-      || this.selectedNeighborIds.has(runtime.id)
-      || projectedHeight >= TITLE_LOD_MAX_PX
-      ? 'card'
-      : projectedHeight >= FAR_LOD_MAX_PX
-        ? 'title'
-        : 'glow'
+  private hemisphereForNode(runtime: NodeRuntime): { value: number; cameraInside: boolean } {
+    const cameraFromCenter = this.camera.position.clone().sub(this.projectionCenter)
+    const nodeFromCenter = runtime.currentPosition.clone().sub(this.projectionCenter)
+    const cameraInside = cameraFromCenter.lengthSq() < nodeFromCenter.lengthSq() * 0.82
+    const value = cameraFromCenter.lengthSq() > 1e-8 && nodeFromCenter.lengthSq() > 1e-8
+      ? cameraFromCenter.normalize().dot(nodeFromCenter.normalize())
+      : 1
+    return { value, cameraInside }
+  }
+
+  private displayPriorityForNode(runtime: NodeRuntime): NodeDisplayPriority {
+    return resolveNodeDisplayPriority(
+      runtime.selected,
+      runtime.id === this.hoveredNodeId,
+    )
+  }
+
+  private preferredNodeHit(
+    hits: readonly Intersection<Object3D>[],
+  ): Intersection<Object3D> | undefined {
+    return hits.reduce<Intersection<Object3D> | undefined>((preferred, hit) => {
+      if (hit.object.userData.interactive !== true) return preferred
+      if (!preferred) return hit
+      const hitRuntime = this.nodes.get(hit.object.userData.nodeId)
+      const preferredRuntime = this.nodes.get(preferred.object.userData.nodeId)
+      const hitOrder = hitRuntime
+        ? NODE_DISPLAY_RENDER_ORDER[this.displayPriorityForNode(hitRuntime)]
+        : NODE_DISPLAY_RENDER_ORDER.default
+      const preferredOrder = preferredRuntime
+        ? NODE_DISPLAY_RENDER_ORDER[this.displayPriorityForNode(preferredRuntime)]
+        : NODE_DISPLAY_RENDER_ORDER.default
+      if (hitOrder !== preferredOrder) return hitOrder > preferredOrder ? hit : preferred
+      return hit.distance < preferred.distance ? hit : preferred
+    }, undefined)
   }
 
   private labelRect(
@@ -1247,24 +1338,75 @@ export class ThreeKnowledgeRenderer {
     }
   }
 
-  private resolveNodeLods() {
+  private applyStableNodeLod(runtime: NodeRuntime, lod: NodeLod, time: number) {
+    const previousLod = runtime.lod
+    this.setNodeLod(runtime, lod)
+    runtime.stableLodChangedAt = time
+    runtime.stableLodCandidate = null
+    runtime.stableLodCandidateSince = time
+    if (previousLod !== 'glow' && lod === 'glow') runtime.labelHiddenSince = time
+  }
+
+  private resolveNodeLods(time: number, force = false): boolean {
     this.camera.updateMatrixWorld()
-    const placed: Array<{ left: number; right: number; top: number; bottom: number }> = []
     const candidates = [...this.nodes.values()]
       .filter((runtime) => (
         runtime.currentOpacity * this.scopeWeightForNode(runtime) > 0.01
       ))
-      .sort((left, right) => {
-        const leftPriority = (left.selected ? 10_000 : 0)
-          + (this.selectedNeighborIds.has(left.id) ? 1_000 : 0)
-          + left.projection.emphasis * 100
-          + this.projectedCardHeight(left)
-        const rightPriority = (right.selected ? 10_000 : 0)
-          + (this.selectedNeighborIds.has(right.id) ? 1_000 : 0)
-          + right.projection.emphasis * 100
-          + this.projectedCardHeight(right)
-        return rightPriority - leftPriority || left.id.localeCompare(right.id)
+    if (candidates.length === 0) return false
+
+    const projectedHeights = new Map<NodeRuntime, number>()
+    const hemispheres = new Map<NodeRuntime, number>()
+    for (const runtime of candidates) {
+      projectedHeights.set(runtime, this.projectedCardHeight(runtime))
+      hemispheres.set(runtime, this.hemisphereForNode(runtime).value)
+    }
+    const detail = stableLodDetail([...projectedHeights.values()])
+    const minimumEmphasis = stableLodMinimumEmphasis(detail)
+    const scoreElapsed = Number.isFinite(this.lastLodScoreTime)
+      ? time - this.lastLodScoreTime
+      : Number.POSITIVE_INFINITY
+    const scoreAlpha = force ? 1 : stableLodScoreAlpha(scoreElapsed)
+    for (const runtime of candidates) {
+      const hemisphere = hemispheres.get(runtime) ?? 1
+      runtime.hemisphereEligible = stableHemisphereEligibility(
+        force ? false : runtime.hemisphereEligible,
+        hemisphere,
+      )
+      const hiddenForMs = runtime.lod === 'glow' ? time - runtime.labelHiddenSince : 0
+      const score = stableLodScore({
+        emphasis: runtime.projection.emphasis,
+        hemisphere,
+        projectedHeight: projectedHeights.get(runtime) ?? 0,
+        detail,
+        hiddenForMs,
       })
+      runtime.stableLodScore = MathUtils.lerp(runtime.stableLodScore, score, scoreAlpha)
+    }
+    this.lastLodScoreTime = time
+
+    const evaluationDue = force
+      || this.reducedMotion
+      || time - this.lastLodEvaluationTime >= STABLE_LOD_EVALUATION_INTERVAL_MS
+    if (!evaluationDue) return true
+    this.lastLodEvaluationTime = time
+
+    candidates.sort((left, right) => {
+      const leftSelected = left.selected ? 2 : this.selectedNeighborIds.has(left.id) ? 1 : 0
+      const rightSelected = right.selected ? 2 : this.selectedNeighborIds.has(right.id) ? 1 : 0
+      if (leftSelected !== rightSelected) return rightSelected - leftSelected
+      const leftScore = left.stableLodScore + (left.lod === 'glow' ? 0 : STABLE_LOD_RETENTION_BONUS)
+      const rightScore = right.stableLodScore + (right.lod === 'glow' ? 0 : STABLE_LOD_RETENTION_BONUS)
+      return rightScore - leftScore || left.id.localeCompare(right.id)
+    })
+
+    const canvas = this.renderer.domElement
+    const labelBudget = stableLodLabelBudget(canvas.clientWidth, canvas.clientHeight, detail)
+    const placed: Array<{ left: number; right: number; top: number; bottom: number }> = []
+    const proposedLods = new Map<NodeRuntime, NodeLod>(
+      candidates.map((runtime) => [runtime, 'glow']),
+    )
+    let usedLabels = 0
 
     const overlaps = (
       candidate: { left: number; right: number; top: number; bottom: number },
@@ -1273,7 +1415,13 @@ export class ThreeKnowledgeRenderer {
       && candidate.top < existing.bottom && candidate.bottom > existing.top
 
     for (const runtime of candidates) {
-      const desired = this.desiredNodeLod(runtime)
+      if (runtime.selected) {
+        const rect = this.labelRect(runtime, 'card')
+        if (rect) placed.push(rect)
+        proposedLods.set(runtime, 'card')
+        usedLabels += 1
+        continue
+      }
       const related = this.selectedNeighborIds.has(runtime.id)
       if (related) {
         let fallback: {
@@ -1287,17 +1435,25 @@ export class ThreeKnowledgeRenderer {
           fallback = { lod: attempt, rect }
           if (placed.some((existing) => overlaps(rect, existing))) continue
           placed.push(rect)
-          this.setNodeLod(runtime, attempt)
+          proposedLods.set(runtime, attempt)
+          usedLabels += 1
           resolved = true
           break
         }
         if (resolved) continue
         if (fallback) {
           placed.push(fallback.rect)
-          this.setNodeLod(runtime, fallback.lod)
+          proposedLods.set(runtime, fallback.lod)
+          usedLabels += 1
           continue
         }
       }
+      if (
+        usedLabels >= labelBudget
+        || !runtime.hemisphereEligible
+        || runtime.projection.emphasis < minimumEmphasis
+      ) continue
+      const desired = stableDesiredLod(projectedHeights.get(runtime) ?? 0, runtime.lod)
       const attempts: NodeLod[] = desired === 'card'
         ? ['card', 'title', 'glow']
         : desired === 'title'
@@ -1317,26 +1473,68 @@ export class ThreeKnowledgeRenderer {
         resolved = attempt
         break
       }
-      this.setNodeLod(runtime, resolved)
+      proposedLods.set(runtime, resolved)
+      if (resolved !== 'glow') usedLabels += 1
     }
+
+    const ready: Array<{ runtime: NodeRuntime; lod: NodeLod }> = []
+    let pending = false
+    for (const runtime of candidates) {
+      const proposed = proposedLods.get(runtime) ?? 'glow'
+      if (proposed === runtime.lod) {
+        runtime.stableLodCandidate = null
+        continue
+      }
+      if (force || this.reducedMotion || runtime.selected || this.selectedNeighborIds.has(runtime.id)) {
+        this.applyStableNodeLod(runtime, proposed, time)
+        continue
+      }
+      if (runtime.stableLodCandidate !== proposed) {
+        runtime.stableLodCandidate = proposed
+        runtime.stableLodCandidateSince = time
+        pending = true
+        continue
+      }
+      if (!stableLodChangeReady(
+        time,
+        runtime.stableLodChangedAt,
+        runtime.stableLodCandidateSince,
+        proposed === 'glow' || (proposed === 'title' && runtime.lod === 'card'),
+      )) {
+        pending = true
+        continue
+      }
+      ready.push({ runtime, lod: proposed })
+    }
+
+    ready.sort((left, right) => {
+      const leftDowngrade = left.lod === 'glow' || (left.lod === 'title' && left.runtime.lod === 'card')
+      const rightDowngrade = right.lod === 'glow' || (right.lod === 'title' && right.runtime.lod === 'card')
+      if (leftDowngrade !== rightDowngrade) return leftDowngrade ? -1 : 1
+      return right.runtime.stableLodScore - left.runtime.stableLodScore
+    })
+    ready.slice(0, STABLE_LOD_MAX_SWAPS_PER_EVALUATION).forEach(({ runtime, lod }) => {
+      this.applyStableNodeLod(runtime, lod, time)
+    })
+    if (ready.length > STABLE_LOD_MAX_SWAPS_PER_EVALUATION) pending = true
+    return pending
   }
 
   private updateNodePresentation(runtime: NodeRuntime) {
     const scopeWeight = this.scopeWeightForNode(runtime)
-    const sphereCenter = this.projectionCenter
-    const cameraFromCenter = this.camera.position.clone().sub(sphereCenter)
-    const nodeFromCenter = runtime.currentPosition.clone().sub(sphereCenter)
-    const cameraInside = cameraFromCenter.lengthSq() < nodeFromCenter.lengthSq() * 0.82
-    const hemisphere = cameraFromCenter.lengthSq() > 1e-8 && nodeFromCenter.lengthSq() > 1e-8
-      ? cameraFromCenter.normalize().dot(nodeFromCenter.normalize())
-      : 1
+    const { value: hemisphere, cameraInside } = this.hemisphereForNode(runtime)
+    const focusRole = getCardFocusRole(this.cardFocus, runtime.id)
     const selectedNeighbor = this.selectedNeighborIds.has(runtime.id)
-    const occlusion = runtime.selected || selectedNeighbor || cameraInside
+    const hovered = runtime.id === this.hoveredNodeId
+    const displayPriority = this.displayPriorityForNode(runtime)
+    const occlusion = runtime.selected || selectedNeighbor || hovered || cameraInside
       ? 1
       : MathUtils.smoothstep(hemisphere, -0.72, 0.18) * 0.72 + 0.28
     const lodOpacity = runtime.lod === 'glow' ? 0.9 : runtime.lod === 'title' ? 0.94 : 1
-    const neighborhoodOpacity = this.selectedNodeId && !runtime.selected && !selectedNeighbor ? 0.46 : 1
-    const focusedOpacity = selectedNeighbor
+    const neighborhoodOpacity = focusRole === 'context' && !hovered ? CARD_FOCUS_CONTEXT_OPACITY : 1
+    const focusedOpacity = hovered
+      ? Math.max(runtime.currentOpacity, 0.96)
+      : selectedNeighbor
       ? Math.max(runtime.currentOpacity, 0.9)
       : runtime.currentOpacity
     const calculatedOpacity = focusedOpacity
@@ -1344,17 +1542,21 @@ export class ThreeKnowledgeRenderer {
       * occlusion
       * lodOpacity
       * neighborhoodOpacity
-    const stableDefaultCard = this.selectedNodeId === null
+    const stableDefaultCard = !this.cardFocus.active
       && runtime.lod !== 'glow'
       && runtime.currentOpacity >= 0.5
       && runtime.targetOpacity >= 0.5
       && scopeWeight >= 0.98
-    runtime.displayOpacity = selectedNeighbor
+    runtime.displayOpacity = hovered
+      ? MathUtils.clamp(calculatedOpacity, 0.94 * scopeWeight, 1)
+      : selectedNeighbor
       ? MathUtils.clamp(calculatedOpacity, RELATED_NODE_MIN_OPACITY * scopeWeight, 1)
       : stableDefaultCard
       ? MathUtils.clamp(calculatedOpacity, 0.58, 0.86)
       : calculatedOpacity
     runtime.material.opacity = runtime.displayOpacity
+    runtime.sprite.renderOrder = NODE_DISPLAY_RENDER_ORDER[displayPriority]
+    runtime.material.depthTest = displayPriority === 'default'
     runtime.group.visible = runtime.currentOpacity * scopeWeight > 0.004
 
     const scopeInteractive = runtime.subspaceId
@@ -1380,7 +1582,7 @@ export class ThreeKnowledgeRenderer {
     if (this.disposed) return
     const deltaSeconds = this.lastFrameTime > 0 ? (time - this.lastFrameTime) / 1000 : 1 / 60
     this.lastFrameTime = time
-    const moving = this.advance(deltaSeconds)
+    const moving = this.advance(deltaSeconds, time)
     const fieldsVisible = [...this.fields.values()].some((runtime) => runtime.mesh.visible)
     this.fieldCompositeMesh.visible = fieldsVisible
     if (fieldsVisible) {
@@ -1395,10 +1597,11 @@ export class ThreeKnowledgeRenderer {
     if (moving || this.pointerGesture !== null || this.movementKeys.size > 0) this.requestRender()
   }
 
-  private advance(deltaSeconds: number): boolean {
+  private advance(deltaSeconds: number, time: number): boolean {
     const positionFactor = expLerpFactor(8.5, deltaSeconds)
     const alphaFactor = expLerpFactor(10, deltaSeconds)
     const cameraFactor = expLerpFactor(7.2, deltaSeconds)
+    const hoverFactor = expLerpFactor(14, deltaSeconds)
     let moving = this.advanceWalking(deltaSeconds)
 
     for (const runtime of this.nodes.values()) {
@@ -1475,7 +1678,7 @@ export class ThreeKnowledgeRenderer {
       this.updateFieldVisibility(runtime)
     }
 
-    this.resolveNodeLods()
+    if (this.resolveNodeLods(time)) moving = true
     for (const runtime of this.nodes.values()) {
       runtime.currentVisualWidth = MathUtils.lerp(
         runtime.currentVisualWidth,
@@ -1487,12 +1690,23 @@ export class ThreeKnowledgeRenderer {
         runtime.targetVisualHeight,
         positionFactor,
       )
-      runtime.sprite.scale.set(runtime.currentVisualWidth, runtime.currentVisualHeight, 1)
+      const targetHoverScale = runtime.id === this.hoveredNodeId
+        ? HOVERED_NODE_VISUAL_SCALE
+        : 1
+      runtime.currentHoverScale = this.reducedMotion
+        ? targetHoverScale
+        : MathUtils.lerp(runtime.currentHoverScale, targetHoverScale, hoverFactor)
+      runtime.sprite.scale.set(
+        runtime.currentVisualWidth * runtime.currentHoverScale,
+        runtime.currentVisualHeight * runtime.currentHoverScale,
+        1,
+      )
       runtime.group.position.copy(runtime.currentPosition)
       this.updateNodePresentation(runtime)
       if (
         Math.abs(runtime.currentVisualWidth - runtime.targetVisualWidth) > SETTLE_EPSILON
         || Math.abs(runtime.currentVisualHeight - runtime.targetVisualHeight) > SETTLE_EPSILON
+        || Math.abs(runtime.currentHoverScale - targetHoverScale) > SETTLE_EPSILON
       ) moving = true
     }
     if (this.hoverPointer && !this.pointerGesture) this.updateHoveredNodeAtPointer()
@@ -1517,9 +1731,17 @@ export class ThreeKnowledgeRenderer {
       this.writeFieldInstances(runtime)
       runtime.material.uniforms.uOpacity.value = runtime.currentOpacity * publicWeight
     }
-    this.resolveNodeLods()
+    this.resolveNodeLods(
+      performance.now(),
+      !Number.isFinite(this.lastLodEvaluationTime),
+    )
     for (const runtime of this.nodes.values()) {
       runtime.group.position.copy(runtime.currentPosition)
+      runtime.sprite.scale.set(
+        runtime.currentVisualWidth * runtime.currentHoverScale,
+        runtime.currentVisualHeight * runtime.currentHoverScale,
+        1,
+      )
       this.updateNodePresentation(runtime)
     }
     this.updateHoverLabelPresentation()
@@ -1546,6 +1768,7 @@ export class ThreeKnowledgeRenderer {
     canvas.addEventListener('pointerup', this.handlePointerUp)
     canvas.addEventListener('pointercancel', this.handlePointerCancel)
     canvas.addEventListener('pointerleave', this.handlePointerLeave)
+    canvas.addEventListener('dblclick', this.handleDoubleClick)
     canvas.addEventListener('wheel', this.handleWheel, { passive: false })
     canvas.addEventListener('contextmenu', this.handleContextMenu)
     window.addEventListener('keydown', this.handleKeyDown)
@@ -1561,6 +1784,7 @@ export class ThreeKnowledgeRenderer {
     canvas.removeEventListener('pointerup', this.handlePointerUp)
     canvas.removeEventListener('pointercancel', this.handlePointerCancel)
     canvas.removeEventListener('pointerleave', this.handlePointerLeave)
+    canvas.removeEventListener('dblclick', this.handleDoubleClick)
     canvas.removeEventListener('wheel', this.handleWheel)
     canvas.removeEventListener('contextmenu', this.handleContextMenu)
     window.removeEventListener('keydown', this.handleKeyDown)
@@ -1572,7 +1796,10 @@ export class ThreeKnowledgeRenderer {
     if (event.button !== 0 && event.button !== 2) return
     if (this.pointerGesture) return
     const mode = event.button === 2 || event.altKey ? 'rotate' : 'pan'
-    const rotationPivot = mode === 'rotate' ? this.projectionCenter.clone() : null
+    const rotationPivot = mode === 'rotate' ? this.rotationPivotForActiveScope() : null
+    const pressedNodeId = mode === 'pan'
+      ? this.pickNodeAtPointer(event.clientX, event.clientY)?.id ?? null
+      : null
     this.clearHoveredNode()
     this.renderer.domElement.setPointerCapture(event.pointerId)
     this.pointerGesture = {
@@ -1580,6 +1807,7 @@ export class ThreeKnowledgeRenderer {
       button: event.button,
       mode,
       rotationPivot,
+      pressedNodeId,
       startX: event.clientX,
       startY: event.clientY,
       lastX: event.clientX,
@@ -1621,7 +1849,9 @@ export class ThreeKnowledgeRenderer {
     this.renderer.domElement.releasePointerCapture(event.pointerId)
     this.pointerGesture = null
     this.renderer.domElement.style.cursor = ''
-    if (!gesture.moved && gesture.button === 0) this.handleClick(event.clientX, event.clientY)
+    if (!gesture.moved && gesture.button === 0) {
+      this.handleClick(event.clientX, event.clientY, gesture.pressedNodeId)
+    }
     this.hoverPointer = { clientX: event.clientX, clientY: event.clientY }
     this.updateHoveredNodeAtPointer()
     this.requestRender()
@@ -1640,6 +1870,30 @@ export class ThreeKnowledgeRenderer {
     if (this.pointerGesture) return
     this.hoverPointer = null
     this.clearHoveredNode()
+  }
+
+  private handleDoubleClick = (event: MouseEvent) => {
+    if (event.button !== 0) return
+    const runtime = this.pickNodeAtPointer(event.clientX, event.clientY)
+    if (!runtime) return
+    const subspace = this.armSubspace(runtime.id)
+    const owner = subspace ? this.nodes.get(subspace.definition.ownerNodeId) : null
+    if (!subspace || !owner) return
+    event.preventDefault()
+    this.clearHoveredNode()
+    this.targetGlobalZoom = subspaceEntryZoom(
+      this.camera.zoom,
+      this.projectedCardHeight(owner),
+      subspace.revealEndPx,
+      subspace.definition.scopeEnterZoom,
+      MAX_GLOBAL_ZOOM,
+    )
+    this.activeZoomAnchor = owner.currentPosition.clone()
+    if (this.reducedMotion) {
+      this.applyGlobalZoomStep(this.targetGlobalZoom)
+      this.activeZoomAnchor = null
+    }
+    this.requestRender()
   }
 
   private handleWheel = (event: WheelEvent) => {
@@ -1714,7 +1968,7 @@ export class ThreeKnowledgeRenderer {
     if (!this.setRayFromClient(clientX, clientY)) return null
     const candidates = this.interactiveNodeRuntimes()
     const hits = this.raycaster.intersectObjects(candidates.map(({ sprite }) => sprite), false)
-    const hit = hits.find(({ object }: Intersection<Object3D>) => object.userData.interactive === true)
+    const hit = this.preferredNodeHit(hits)
     const hitNodeId = hit?.object.userData.nodeId
     if (typeof hitNodeId === 'string') return this.nodes.get(hitNodeId) ?? null
 
@@ -1749,10 +2003,11 @@ export class ThreeKnowledgeRenderer {
       this.interactiveNodeRuntimes().map(({ sprite }) => sprite),
       false,
     )
-    if (hits[0]?.point) {
-      const nodeId = hits[0].object.userData.nodeId
+    const preferredHit = this.preferredNodeHit(hits)
+    if (preferredHit?.point) {
+      const nodeId = preferredHit.object.userData.nodeId
       return {
-        point: hits[0].point.clone(),
+        point: preferredHit.point.clone(),
         nodeId: typeof nodeId === 'string' ? nodeId : null,
       }
     }
@@ -1803,11 +2058,14 @@ export class ThreeKnowledgeRenderer {
       return
     }
     const runtime = this.pickNodeAtPointer(this.hoverPointer.clientX, this.hoverPointer.clientY)
-    const nextId = runtime?.lod === 'glow' ? runtime.id : null
+    const nextId = runtime?.id ?? null
     this.renderer.domElement.style.cursor = runtime ? 'pointer' : ''
     if (nextId === this.hoveredNodeId) return
+    const previousId = this.hoveredNodeId
     this.hoveredNodeId = nextId
-    if (!runtime || !nextId) {
+    this.refreshNodeTexture(previousId)
+    this.refreshNodeTexture(nextId)
+    if (!runtime || !nextId || runtime.lod !== 'glow') {
       this.hoverLabelSprite.visible = false
     } else {
       this.hoverLabelMaterial.map = this.textureForLod(runtime, 'title', false)
@@ -1819,10 +2077,20 @@ export class ThreeKnowledgeRenderer {
 
   private clearHoveredNode() {
     if (this.hoveredNodeId === null && !this.hoverLabelSprite.visible) return
+    const previousId = this.hoveredNodeId
     this.hoveredNodeId = null
     this.hoverLabelSprite.visible = false
+    this.refreshNodeTexture(previousId)
     if (!this.pointerGesture) this.renderer.domElement.style.cursor = ''
     this.requestRender()
+  }
+
+  private refreshNodeTexture(nodeId: string | null) {
+    if (!nodeId) return
+    const runtime = this.nodes.get(nodeId)
+    if (!runtime) return
+    runtime.material.map = this.textureForLod(runtime, runtime.lod, runtime.selected)
+    runtime.material.needsUpdate = true
   }
 
   private updateHoverLabelPresentation() {
@@ -1833,11 +2101,14 @@ export class ThreeKnowledgeRenderer {
     const runtime = this.nodes.get(this.hoveredNodeId)
     if (
       !runtime
-      || runtime.lod !== 'glow'
       || runtime.sprite.userData.interactive !== true
       || runtime.displayOpacity <= 0.025
     ) {
       this.clearHoveredNode()
+      return
+    }
+    if (runtime.lod !== 'glow') {
+      this.hoverLabelSprite.visible = false
       return
     }
     const depth = this.cameraSpaceDepth(runtime.currentPosition)
@@ -1936,8 +2207,11 @@ export class ThreeKnowledgeRenderer {
     this.camera.updateMatrixWorld()
   }
 
-  private handleClick(clientX: number, clientY: number) {
-    const runtime = this.pickNodeAtPointer(clientX, clientY)
+  private handleClick(clientX: number, clientY: number, pressedNodeId: string | null = null) {
+    const pressedRuntime = pressedNodeId ? this.nodes.get(pressedNodeId) : null
+    const runtime = pressedRuntime?.sprite.userData.interactive === true
+      ? pressedRuntime
+      : this.pickNodeAtPointer(clientX, clientY)
     if (runtime) this.callbacks.onSelectNode?.(runtime.id)
     else this.callbacks.onBlankClick?.()
   }

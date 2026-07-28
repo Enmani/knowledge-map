@@ -30,6 +30,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "restart:quick": "node scripts/restart-quick.mjs",
     "build": "tsc -b && vite build",
     "test:smoke": "node src/engine/smoke-test.mjs && node src/frontier/smoke-test.mjs && node src/knowledge/space3d/smoke-test.mjs",
     "preview": "vite preview"

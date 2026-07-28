@@ -6,6 +6,7 @@ import {
   useRef,
 } from 'react'
 import type { KnowledgeSpaceProjection } from '../../knowledge/space3d/types'
+import type { CardFocusState } from '../../renderers/core/cardFocus'
 import {
   ThreeKnowledgeRenderer,
   type SpaceColorTheme,
@@ -20,6 +21,7 @@ export interface ThreeKnowledgeSurfaceHandle {
 
 export interface ThreeKnowledgeSurfaceProps {
   projection: KnowledgeSpaceProjection
+  cardFocus: CardFocusState
   selectedNodeId: string | null
   walkingMode?: boolean
   fieldsVisible?: boolean
@@ -39,6 +41,7 @@ export const ThreeKnowledgeSurface = forwardRef<
   ThreeKnowledgeSurfaceProps
 >(function ThreeKnowledgeSurface({
   projection,
+  cardFocus,
   selectedNodeId,
   walkingMode = false,
   fieldsVisible = true,
@@ -73,6 +76,7 @@ export const ThreeKnowledgeSurface = forwardRef<
       const renderer = new ThreeKnowledgeRenderer({
         host,
         projection,
+        cardFocus,
         selectedNodeId,
         walkingMode,
         fieldsVisible,
@@ -105,6 +109,10 @@ export const ThreeKnowledgeSurface = forwardRef<
   useLayoutEffect(() => {
     rendererRef.current?.setSelectedNodeId(selectedNodeId)
   }, [selectedNodeId])
+
+  useLayoutEffect(() => {
+    rendererRef.current?.setCardFocusState(cardFocus)
+  }, [cardFocus])
 
   useLayoutEffect(() => {
     rendererRef.current?.setWalkingMode(walkingMode)

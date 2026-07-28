@@ -52,4 +52,6 @@ export const calculusThreeSubspace: ThreeKnowledgeSubspace = {
   edges,
   revealStartPx: 360,
   revealEndPx: 620,
+  scopeEnterZoom: 12.45,
+  scopeExitZoom: 8,
 }

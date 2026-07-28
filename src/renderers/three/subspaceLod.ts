@@ -1,3 +1,5 @@
+import type { SpaceVector3 } from '../../knowledge/space3d/types'
+
 export const SUBSPACE_SCOPE_ENTER_PROGRESS = 0.8
 export const SUBSPACE_SCOPE_EXIT_PROGRESS = 0.2
 
@@ -29,4 +31,48 @@ export function subspaceRevealProgress(
 
 export function parentScopeWeight(childProgress: number): number {
   return 1 - smoothstep(childProgress, 0.18, 1)
+}
+
+export function subspaceCardCenter(
+  positions: readonly SpaceVector3[],
+  fallback: SpaceVector3,
+): SpaceVector3 {
+  if (positions.length === 0) return [...fallback]
+  const sum = positions.reduce<SpaceVector3>((center, position) => [
+    center[0] + position[0],
+    center[1] + position[1],
+    center[2] + position[2],
+  ], [0, 0, 0])
+  return [
+    sum[0] / positions.length,
+    sum[1] / positions.length,
+    sum[2] / positions.length,
+  ]
+}
+
+export function subspaceEntryZoom(
+  currentZoom: number,
+  projectedOwnerHeight: number,
+  revealEndPx: number,
+  minimumEntryZoom: number,
+  maximumZoom: number,
+): number {
+  if (projectedOwnerHeight <= 0 || revealEndPx <= 0) return currentZoom
+  const targetHeight = revealEndPx * 1.02
+  return Math.min(
+    maximumZoom,
+    Math.max(currentZoom, minimumEntryZoom, currentZoom * targetHeight / projectedOwnerHeight),
+  )
+}
+
+export function shouldEnterSubspaceScope(
+  cameraZoom: number,
+  childProgress: number,
+  entryZoom: number,
+): boolean {
+  return cameraZoom >= entryZoom && childProgress >= SUBSPACE_SCOPE_ENTER_PROGRESS
+}
+
+export function shouldExitSubspaceScope(cameraZoom: number, exitZoom: number): boolean {
+  return cameraZoom <= exitZoom
 }

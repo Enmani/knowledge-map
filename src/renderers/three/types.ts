@@ -4,6 +4,7 @@ import type {
   KnowledgeSpaceProjection,
   SpaceVector3,
 } from '../../knowledge/space3d/types'
+import type { CardFocusState } from '../core/cardFocus'
 
 export type SpaceColorTheme = 'light' | 'dark'
 
@@ -26,6 +27,8 @@ export interface ThreeKnowledgeSubspace {
   edges: readonly KnowledgeSpaceEdge[]
   revealStartPx: number
   revealEndPx: number
+  scopeEnterZoom: number
+  scopeExitZoom: number
 }
 
 export interface ThreeKnowledgeRendererCallbacks {
@@ -38,6 +41,7 @@ export interface ThreeKnowledgeRendererCallbacks {
 export interface ThreeKnowledgeRendererOptions extends ThreeKnowledgeRendererCallbacks {
   host: HTMLElement
   projection: KnowledgeSpaceProjection
+  cardFocus: CardFocusState
   selectedNodeId?: string | null
   walkingMode?: boolean
   fieldsVisible?: boolean

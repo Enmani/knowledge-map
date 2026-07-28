@@ -7,7 +7,12 @@ export type FrontierDiscipline =
   | 'biology'
   | 'interdisciplinary'
 
-export type FrontierEntryKind = 'research-update' | 'award-overview' | 'award-research'
+export type FrontierEntryKind =
+  | 'research-update'
+  | 'open-problem'
+  | 'historical-milestone'
+  | 'award-overview'
+  | 'award-research'
 
 export type FrontierEntryStatus = 'draft' | 'reviewed' | 'published' | 'archived'
 

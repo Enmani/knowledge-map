@@ -30,6 +30,7 @@ export interface PixiMapSurfaceProps {
   camera: CameraTransform
   viewport: { width: number; height: number }
   panelOpen: boolean
+  panelWidth: number
   activeSceneId: MapSceneId
   pinnedChildSceneId: MapSceneId | null
   visualState: PixiVisualState
@@ -56,6 +57,7 @@ export const PixiMapSurface = forwardRef<PixiMapSurfaceHandle, PixiMapSurfacePro
   camera,
   viewport,
   panelOpen,
+  panelWidth,
   activeSceneId,
   pinnedChildSceneId,
   visualState,
@@ -79,7 +81,7 @@ export const PixiMapSurface = forwardRef<PixiMapSurfaceHandle, PixiMapSurfacePro
       initialState: {
         camera,
         viewport,
-        panel: { open: panelOpen, width: 390 },
+        panel: { open: panelOpen, width: panelWidth },
         activeSceneId,
         pinnedChildSceneId,
       },
@@ -165,13 +167,13 @@ export const PixiMapSurface = forwardRef<PixiMapSurfaceHandle, PixiMapSurfacePro
     const surfaceViewport = measuredViewport()
     kernelRef.current!.update({
       viewport: surfaceViewport,
-      panel: { open: panelOpen, width: 390 },
+      panel: { open: panelOpen, width: panelWidth },
       activeSceneId,
       pinnedChildSceneId,
     })
     rendererRef.current?.resize(surfaceViewport.width, surfaceViewport.height)
     presentFrame()
-  }, [activeSceneId, measuredViewport, panelOpen, pinnedChildSceneId, presentFrame, viewport])
+  }, [activeSceneId, measuredViewport, panelOpen, panelWidth, pinnedChildSceneId, presentFrame, viewport])
 
   useLayoutEffect(() => {
     rendererRef.current?.updateVisualState(visualState)

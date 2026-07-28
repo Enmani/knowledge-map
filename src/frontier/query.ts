@@ -14,6 +14,14 @@ const statusRank: Record<FrontierEntryStatus, number> = {
   archived: 1,
 }
 
+export function isPublicFrontierEntry(entry: FrontierEntry): boolean {
+  return entry.status === 'published' || entry.status === 'reviewed'
+}
+
+export function isDefaultFrontierEntry(entry: FrontierEntry): boolean {
+  return isPublicFrontierEntry(entry) && entry.kind !== 'historical-milestone'
+}
+
 function compareCandidatePriority(left: FrontierEntry, right: FrontierEntry): number {
   return (
     statusRank[right.status] - statusRank[left.status] ||

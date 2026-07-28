@@ -19,6 +19,13 @@ import {
   type MapSceneId,
 } from '../../features/map/sceneCatalog'
 import type { GeneratedTagField } from '../../lib/tagLayout'
+import {
+  CARD_FOCUS_CONTEXT_OPACITY,
+  EMPTY_CARD_FOCUS,
+  getCardFocusEdgeRole,
+  getCardFocusRole,
+  type CardFocusState,
+} from '../core/cardFocus'
 import type {
   PixiCameraTransform,
   PixiHitTestResult,
@@ -37,6 +44,7 @@ const MONOCHROME = 0x777777
 const MASTERED = 0x376b62
 const AVAILABLE = 0xa76a2d
 const LOCKED = 0x8f8d88
+const FRONTIER = 0xa45139
 const EDGE_BASE = 0x6f6b62
 const FIELD_RASTER_SCALE = 0.36
 const FIELD_MAX_RASTER_EDGE = 2048
@@ -64,9 +72,11 @@ interface NormalizedVisualState {
   mutedNodeIds: ReadonlySet<string>
   nonInteractiveNodeIds: ReadonlySet<string>
   highlightedNodeIds: ReadonlySet<string>
+  cardFocus: CardFocusState
   statuses: Readonly<Record<string, PixiNodeStatus>>
   activeDomains?: PixiVisualState['activeDomains']
   activeFieldTag: FieldTagId | null
+  frontierNodeCounts: Readonly<Record<string, number>>
 }
 
 interface NodeRuntime {
@@ -84,6 +94,8 @@ interface NodeRuntime {
   emphasisOutline: Graphics
   statusDot: Graphics
   nextBadge: Container
+  frontierBadge: Container
+  frontierCount: Text
   hidden: boolean
   silhouette: boolean
   interactive: boolean
@@ -161,9 +173,11 @@ function normalizeVisualState(state: PixiVisualState): NormalizedVisualState {
     mutedNodeIds: state.mutedNodeIds ?? EMPTY_SET,
     nonInteractiveNodeIds: state.nonInteractiveNodeIds ?? EMPTY_SET,
     highlightedNodeIds: state.highlightedNodeIds ?? EMPTY_SET,
+    cardFocus: state.cardFocus ?? EMPTY_CARD_FOCUS,
     statuses: state.statuses ?? {},
     activeDomains: state.activeDomains,
     activeFieldTag: state.activeFieldTag ?? null,
+    frontierNodeCounts: state.frontierNodeCounts ?? {},
   }
 }
 
@@ -781,7 +795,6 @@ export class PixiMapRenderer {
       .roundRect(-0.7, -0.7, cardWidth + 1.4, cardHeight + 1.4, 2.5)
       .stroke({ color: 0xffffff, width: 1.2, alpha: 1 })
     emphasisOutline.alpha = 0
-
     const nextBadge = new Container()
     const nextBadgeBackground = new Graphics()
       .roundRect(0, 0, 42, 14, 7)
@@ -803,6 +816,27 @@ export class PixiMapRenderer {
     nextBadge.position.set(cardWidth - 47, -9)
     nextBadge.alpha = 0
 
+    const frontierBadge = new Container()
+    const frontierBadgeBackground = new Graphics()
+      .roundRect(0, 0, 28, 14, 7)
+      .fill({ color: 0xefe0c0, alpha: 1 })
+      .stroke({ color: FRONTIER, width: 0.8, alpha: 0.88 })
+    const frontierCount = new Text({
+      text: '1',
+      style: {
+        fontFamily: 'Georgia, "Times New Roman", serif',
+        fontSize: 8,
+        fontWeight: '600',
+        fill: FRONTIER,
+      },
+      resolution: 2,
+    })
+    frontierCount.anchor.set(0.5)
+    frontierCount.position.set(14, 7)
+    frontierBadge.addChild(frontierBadgeBackground, frontierCount)
+    frontierBadge.position.set(cardWidth - 31, -9)
+    frontierBadge.alpha = 0
+
     detail.addChild(indexText, title, english, tags, statusDot)
     card.addChild(
       surface,
@@ -812,6 +846,7 @@ export class PixiMapRenderer {
       emphasisOutline,
       selectionOutline,
       nextBadge,
+      frontierBadge,
     )
 
     return {
@@ -829,6 +864,8 @@ export class PixiMapRenderer {
       emphasisOutline,
       statusDot,
       nextBadge,
+      frontierBadge,
+      frontierCount,
       hidden: false,
       silhouette: false,
       interactive: true,
@@ -886,19 +923,22 @@ export class PixiMapRenderer {
     const state = this.visualState
     const nodeId = runtime.node.id
     const domainColor = colorNumber(domainById[runtime.node.domain].color)
-    const selected = state.selectedNodeId === nodeId
+    const focusRole = getCardFocusRole(state.cardFocus, nodeId)
+    const selected = focusRole === 'primary'
       && (!state.selectedSceneId || state.selectedSceneId === sceneId)
+    const related = focusRole === 'related'
     const hidden = state.hiddenNodeIds.has(nodeId)
     const silhouette = !hidden && state.silhouetteNodeIds.has(nodeId)
     const tagFiltered = Boolean(
       state.activeFieldTag && !runtime.node.fieldTags.includes(state.activeFieldTag),
     )
     const path = state.pathNodeIds.has(nodeId)
-    const context = state.contextNodeIds.has(nodeId)
+    const context = focusRole === 'context'
     const nextUnlock = state.nextUnlockNodeIds.has(nodeId)
     const muted = state.mutedNodeIds.has(nodeId)
       || Boolean(state.activeDomains && !state.activeDomains.has(runtime.node.domain))
     const highlighted = state.highlightedNodeIds.has(nodeId)
+    const frontierCount = state.frontierNodeCounts[nodeId] ?? 0
 
     runtime.hidden = hidden
     runtime.silhouette = silhouette
@@ -912,7 +952,7 @@ export class PixiMapRenderer {
     let alpha = 1
     if (silhouette) alpha = 0.32
     else if (muted) alpha = 0.07
-    else if (context && !selected && !path && !nextUnlock) alpha = 0.52
+    else if (context) alpha = CARD_FOCUS_CONTEXT_OPACITY
 
     runtime.card.alpha = alpha
     runtime.marker.alpha = silhouette ? 0.26 : alpha
@@ -925,9 +965,11 @@ export class PixiMapRenderer {
     runtime.tags.tint = nextUnlock ? MONOCHROME : 0xffffff
     runtime.selectionOutline.alpha = selected && !silhouette && !muted ? 1 : 0
     runtime.emphasisOutline.tint = nextUnlock ? MONOCHROME : domainColor
-    runtime.emphasisOutline.alpha = !silhouette && !muted && (highlighted || path || nextUnlock) ? 1 : 0
+    runtime.emphasisOutline.alpha = !silhouette && !muted && (related || highlighted || path || nextUnlock) ? 1 : 0
     runtime.nextBadge.alpha = nextUnlock && !silhouette && !muted ? 1 : 0
     runtime.statusDot.tint = statusColor(state.statuses[nodeId], nextUnlock ? MONOCHROME : domainColor)
+    runtime.frontierCount.text = `◎ ${frontierCount}`
+    runtime.frontierBadge.alpha = frontierCount > 0 && !silhouette && !muted ? 1 : 0
   }
 
   private applyFogVisualState(runtime: SceneRuntime): void {
@@ -1015,6 +1057,7 @@ export class PixiMapRenderer {
       || Boolean(state.activeDomains && !state.activeDomains.has(sourceNode.domain))
     const targetMuted = state.mutedNodeIds.has(edge.targetId)
       || Boolean(state.activeDomains && !state.activeDomains.has(targetNode.domain))
+    const focusEdgeRole = getCardFocusEdgeRole(state.cardFocus, edge.sourceId, edge.targetId)
 
     let alpha = 0.14
     let tint = EDGE_BASE
@@ -1026,6 +1069,11 @@ export class PixiMapRenderer {
     } else if (targetNext && (sourcePath || sourceContext)) {
       alpha = 0.72
       tint = MONOCHROME
+    } else if (focusEdgeRole === 'connected') {
+      alpha = 0.72
+      tint = colorNumber(domainById[targetNode.domain].color)
+    } else if (focusEdgeRole === 'context') {
+      alpha = 0.025
     } else if (sourceContext && targetContext) {
       alpha = 0.38
     }

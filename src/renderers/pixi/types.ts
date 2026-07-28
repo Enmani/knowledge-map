@@ -1,5 +1,6 @@
 import type { DomainId, FieldTagId, MathNode } from '../../data/mathMap'
 import type { MapSceneId } from '../../features/map/sceneCatalog'
+import type { CardFocusState } from '../core/cardFocus'
 
 export interface PixiMapRendererOptions {
   host: HTMLElement
@@ -47,9 +48,11 @@ export interface PixiVisualState {
   mutedNodeIds?: ReadonlySet<string>
   nonInteractiveNodeIds?: ReadonlySet<string>
   highlightedNodeIds?: ReadonlySet<string>
+  cardFocus?: CardFocusState
   statuses?: Readonly<Record<string, PixiNodeStatus>>
   activeDomains?: ReadonlySet<DomainId>
   activeFieldTag?: FieldTagId | null
+  frontierNodeCounts?: Readonly<Record<string, number>>
 }
 
 export interface PixiHitTestResult {

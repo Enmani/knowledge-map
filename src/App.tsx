@@ -13,6 +13,7 @@ import {
   Moon,
   Plus,
   RotateCcw,
+  Radar,
   Search,
   Sparkles,
   Sun,
@@ -21,6 +22,11 @@ import {
 import { interpolateZoom, type ZoomView } from 'd3-interpolate'
 import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { frontierStatusLabels, getKnowledgeContentForConcept } from './content'
+import {
+  frontierCatalog,
+  isDefaultFrontierEntry,
+  isPublicFrontierEntry,
+} from './frontier'
 import {
   domainById,
   domains,
@@ -63,8 +69,15 @@ import {
   PixiMapSurface,
   type PixiMapSurfaceHandle,
 } from './features/map/components/PixiMapSurface'
+import { FrontierRadar } from './features/frontier/FrontierRadar'
+import {
+  clampWorkbenchWidth,
+  DEFAULT_WORKBENCH_WIDTH,
+  SideWorkbench,
+} from './features/workbench/SideWorkbench'
 import { fieldColor } from './lib/tagLayout'
 import { loadProgressFromStorage, saveProgressToStorage } from './persistence/progressStorage'
+import { resolveCardFocusState } from './renderers/core/cardFocus'
 import type { PixiHitTestResult, PixiVisualState } from './renderers/pixi'
 import { WidgetRenderer } from './widgets'
 import {
@@ -136,6 +149,27 @@ const allKnowledgeSpaceNodeById = Object.fromEntries(
   allKnowledgeSpaceNodes.map((node) => [node.id, node]),
 )
 
+const publicFrontierEntries = frontierCatalog.entries.filter(isPublicFrontierEntry)
+const defaultFrontierEntries = publicFrontierEntries.filter(isDefaultFrontierEntry)
+const defaultFrontierConceptIds = new Set(
+  defaultFrontierEntries.flatMap((entry) => entry.relatedConceptIds),
+)
+const frontierEntryCountsByConcept = publicFrontierEntries.reduce<Record<string, number>>((counts, entry) => {
+  entry.relatedConceptIds.forEach((conceptId) => {
+    counts[conceptId] = (counts[conceptId] ?? 0) + 1
+  })
+  return counts
+}, {})
+const frontierConceptLabels: Readonly<Record<string, string>> = Object.fromEntries([
+  ...Object.values(atlasNodeIndex).map((node) => [node.id, node.title] as const),
+  ...allKnowledgeSpaceNodes.map((node) => [node.id, node.title] as const),
+])
+const SPACE_TO_MATH_CONCEPT_ID: Readonly<Record<string, string>> = {
+  'quantity-arithmetic': 'numbers',
+  'mathematical-logic': 'logic',
+  'set-theory': 'sets',
+}
+
 const relationTypeLabels: Readonly<Record<KnowledgeRelationType, string>> = {
   prerequisite: '前置',
   application: '应用',
@@ -177,7 +211,13 @@ function buildSceneSelectionContext(scene: MapScene, selectedId: string | null):
   return { upstream, nextUnlockIds }
 }
 
-function cameraForNode(scene: MapScene, nodeId: string, viewport: { width: number; height: number }, scale = 0.92): Transform {
+function cameraForNode(
+  scene: MapScene,
+  nodeId: string,
+  viewport: { width: number; height: number },
+  scale = 0.92,
+  workbenchWidth = DEFAULT_WORKBENCH_WIDTH,
+): Transform {
   const position = scene.layout.positions[nodeId]
   const sceneScale = sceneScaleInRoot(scene.id)
   const center = mapScenePointToRoot(scene.id, {
@@ -185,7 +225,7 @@ function cameraForNode(scene: MapScene, nodeId: string, viewport: { width: numbe
     y: position.y + scene.nodeHeight / 2,
   })
   const rootScale = scale / sceneScale
-  const panelWidth = viewport.width > 800 ? 390 : 0
+  const panelWidth = viewport.width > 900 ? workbenchWidth + 12 : 0
   return {
     scale: rootScale,
     x: (viewport.width - panelWidth) / 2 - center.x * rootScale,
@@ -193,9 +233,13 @@ function cameraForNode(scene: MapScene, nodeId: string, viewport: { width: numbe
   }
 }
 
-function cameraViewportSize(viewport: { width: number; height: number }, panelOpen: boolean) {
+function cameraViewportSize(
+  viewport: { width: number; height: number },
+  panelOpen: boolean,
+  workbenchWidth: number,
+) {
   return {
-    width: viewport.width > 800 && panelOpen ? viewport.width - 390 : viewport.width,
+    width: viewport.width > 900 && panelOpen ? viewport.width - workbenchWidth - 12 : viewport.width,
     height: viewport.height,
   }
 }
@@ -222,6 +266,7 @@ function cameraForPortal(
   ownerNodeId: string,
   scale: number,
   viewport: { width: number; height: number },
+  workbenchWidth: number,
 ): Transform {
   const ownerPosition = parentScene.layout.positions[ownerNodeId]
   const parentScale = sceneScaleInRoot(parentScene.id)
@@ -229,7 +274,7 @@ function cameraForPortal(
     x: ownerPosition.x + parentScene.nodeWidth / 2,
     y: ownerPosition.y + parentScene.nodeHeight / 2,
   })
-  const contentViewportWidth = viewport.width > 800 ? viewport.width - 390 : viewport.width
+  const contentViewportWidth = viewport.width > 900 ? viewport.width - workbenchWidth - 12 : viewport.width
   const rootScale = scale / parentScale
   return {
     scale: rootScale,
@@ -242,6 +287,8 @@ function App() {
   const pixiSurfaceRef = useRef<PixiMapSurfaceHandle>(null)
   const threeSurfaceRef = useRef<ThreeKnowledgeSurfaceHandle>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const frontierTriggerRef = useRef<HTMLButtonElement>(null)
+  const frontierOpenerRef = useRef<HTMLElement | null>(null)
   const zoomValueRef = useRef<HTMLSpanElement>(null)
   const spaceZoomValueRef = useRef<HTMLSpanElement>(null)
   const lastZoomPercentRef = useRef<number | null>(null)
@@ -268,6 +315,13 @@ function App() {
   const [spaceColorTheme, setSpaceColorTheme] = useState<SpaceColorTheme>(() => (
     localStorage.getItem('knowledge-space-color-theme') === 'dark' ? 'dark' : 'light'
   ))
+  const [workbenchWidth, setWorkbenchWidth] = useState(() => {
+    const storedWidth = Number.parseFloat(localStorage.getItem('knowledge-side-workbench-width') ?? '')
+    return clampWorkbenchWidth(
+      Number.isFinite(storedWidth) ? storedWidth : DEFAULT_WORKBENCH_WIDTH,
+      Number.POSITIVE_INFINITY,
+    )
+  })
   const [selectedSpaceNodeId, setSelectedSpaceNodeId] = useState<string | null>(null)
   const [threeFailure, setThreeFailure] = useState<Error | null>(null)
   const [transform, setTransform] = useState<Transform>(() => {
@@ -286,6 +340,11 @@ function App() {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [showLegend, setShowLegend] = useState(false)
+  const [frontierOpen, setFrontierOpen] = useState(false)
+  const [frontierConceptId, setFrontierConceptId] = useState<string | null>(null)
+  const [frontierMatchedConceptIds, setFrontierMatchedConceptIds] = useState<ReadonlySet<string>>(
+    () => defaultFrontierConceptIds,
+  )
   const [showIntro, setShowIntro] = useState(() => localStorage.getItem('math-atlas-intro') !== 'seen')
   const [completedWidgets, setCompletedWidgets] = useState<Set<string>>(() => new Set())
   const [pinnedChildSceneId, setPinnedChildSceneId] = useState<MapSceneId | null>(null)
@@ -329,6 +388,13 @@ function App() {
   }, [selectedSpaceNodeId, visibleSpaceNodeIds])
   const selectedVisibility = selectedNode ? getFogVisibility(knowledgeAtlas, progressStore, selectedNode.id) : null
   const selectedContent = selectedNode ? getKnowledgeContentForConcept(selectedNode.id) : undefined
+  const selectedFrontierCount = selectedNode ? frontierEntryCountsByConcept[selectedNode.id] ?? 0 : 0
+  const selectedSpaceFrontierConceptId = selectedSpaceNode
+    ? SPACE_TO_MATH_CONCEPT_ID[selectedSpaceNode.id] ?? selectedSpaceNode.id
+    : null
+  const selectedSpaceFrontierCount = selectedSpaceFrontierConceptId
+    ? frontierEntryCountsByConcept[selectedSpaceFrontierConceptId] ?? 0
+    : 0
   const mastered = useMemo(() => new Set(
     [...progressStore.byConcept.values()]
       .filter((entry) => entry.level === 'mastered')
@@ -398,6 +464,38 @@ function App() {
     () => buildSceneSelectionContext(activeScene, selectedId),
     [activeScene, selectedId],
   )
+  const atlasCardFocus = useMemo(() => {
+    const selectionRelatedIds = new Set([
+      ...activeSceneSelectionContext.upstream,
+      ...activeSceneSelectionContext.nextUnlockIds,
+    ])
+    return resolveCardFocusState({
+      allNodeIds: activeScene.nodes.map((node) => node.id),
+      primaryNodeIds: frontierOpen || !selectedId ? EMPTY_ID_SET : [selectedId],
+      relatedNodeIds: frontierOpen ? frontierMatchedConceptIds : selectionRelatedIds,
+    })
+  }, [activeScene, activeSceneSelectionContext, frontierMatchedConceptIds, frontierOpen, selectedId])
+  const frontierSpaceNodeIds = useMemo(() => new Set(
+    allKnowledgeSpaceNodes
+      .filter((node) => frontierMatchedConceptIds.has(SPACE_TO_MATH_CONCEPT_ID[node.id] ?? node.id))
+      .map((node) => node.id),
+  ), [frontierMatchedConceptIds])
+  const selectedSpaceRelatedNodeIds = useMemo(() => new Set(
+    selectedSpaceRelations.map((edge) => (
+      edge.source === selectedSpaceNodeId ? edge.target : edge.source
+    )),
+  ), [selectedSpaceNodeId, selectedSpaceRelations])
+  const spaceCardFocus = useMemo(() => resolveCardFocusState({
+    allNodeIds: visibleSpaceNodeIds,
+    primaryNodeIds: frontierOpen || !selectedSpaceNodeId ? EMPTY_ID_SET : [selectedSpaceNodeId],
+    relatedNodeIds: frontierOpen ? frontierSpaceNodeIds : selectedSpaceRelatedNodeIds,
+  }), [
+    frontierOpen,
+    frontierSpaceNodeIds,
+    selectedSpaceNodeId,
+    selectedSpaceRelatedNodeIds,
+    visibleSpaceNodeIds,
+  ])
   const pixiVisualState = useMemo<PixiVisualState>(() => {
     const hiddenNodeIds = new Set<string>()
     const silhouetteNodeIds = new Set<string>()
@@ -426,31 +524,29 @@ function App() {
       if (!visibility.interactive) nonInteractiveNodeIds.add(node.id)
     })
 
-    const pathNodeIds = new Set(activeSceneSelectionContext.upstream)
-    const nextUnlockNodeIds = new Set(activeSceneSelectionContext.nextUnlockIds)
-    const contextNodeIds = new Set<string>()
-    if (selectedId) {
-      activeScene.nodes.forEach((node) => {
-        if (node.id !== selectedId && !pathNodeIds.has(node.id) && !nextUnlockNodeIds.has(node.id)) {
-          contextNodeIds.add(node.id)
-        }
-      })
-    }
+    const pathNodeIds = frontierOpen
+      ? new Set<string>()
+      : new Set(activeSceneSelectionContext.upstream)
+    const nextUnlockNodeIds = frontierOpen
+      ? new Set<string>()
+      : new Set(activeSceneSelectionContext.nextUnlockIds)
 
     return {
       selectedSceneId: activeSceneId,
-      selectedNodeId: selectedId,
+      selectedNodeId: frontierOpen ? null : selectedId,
       hiddenNodeIds,
       silhouetteNodeIds,
       pathNodeIds,
-      contextNodeIds,
+      contextNodeIds: atlasCardFocus.contextNodeIds,
       nextUnlockNodeIds,
       mutedNodeIds,
       nonInteractiveNodeIds,
-      highlightedNodeIds: pathNodeIds,
+      highlightedNodeIds: atlasCardFocus.relatedNodeIds,
+      cardFocus: atlasCardFocus,
       statuses,
       activeDomains,
       activeFieldTag: activeTag,
+      frontierNodeCounts: frontierEntryCountsByConcept,
     }
   }, [
     activeDomains,
@@ -458,6 +554,8 @@ function App() {
     activeSceneId,
     activeSceneSelectionContext,
     activeTag,
+    atlasCardFocus,
+    frontierOpen,
     progressStore,
     query,
     selectedId,
@@ -471,6 +569,22 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem('knowledge-space-color-theme', spaceColorTheme)
   }, [spaceColorTheme])
+
+  useEffect(() => {
+    const saveTimer = window.setTimeout(() => {
+      window.localStorage.setItem('knowledge-side-workbench-width', String(workbenchWidth))
+    }, 180)
+    return () => window.clearTimeout(saveTimer)
+  }, [workbenchWidth])
+
+  useEffect(() => {
+    const clampWidth = () => {
+      if (window.innerWidth <= 900) return
+      setWorkbenchWidth((current) => clampWorkbenchWidth(current))
+    }
+    window.addEventListener('resize', clampWidth)
+    return () => window.removeEventListener('resize', clampWidth)
+  }, [])
 
   useEffect(() => {
     if (progressStore.mode === 'free' || !selectedNode) return
@@ -524,7 +638,7 @@ function App() {
       return
     }
 
-    const cameraViewport = cameraViewportSize(viewport, selectedId !== null)
+    const cameraViewport = cameraViewportSize(viewport, frontierOpen || selectedId !== null, workbenchWidth)
     const interpolateView = interpolateZoom(
       transformToZoomView(start, cameraViewport),
       transformToZoomView(target, cameraViewport),
@@ -546,7 +660,7 @@ function App() {
     }
 
     cameraAnimationFrameRef.current = window.requestAnimationFrame(step)
-  }, [cancelCameraAnimation, paintCamera, selectedId, viewport])
+  }, [cancelCameraAnimation, frontierOpen, paintCamera, selectedId, viewport, workbenchWidth])
 
   const zoomAt = useCallback((nextScale: number, screenX = viewport.width / 2, screenY = viewport.height / 2) => {
     setPinnedChildSceneId(null)
@@ -558,7 +672,7 @@ function App() {
 
   const fitMap = useCallback(() => {
     setPinnedChildSceneId(null)
-    const sideAllowance = selectedId && viewport.width > 800 ? 420 : 0
+    const sideAllowance = (frontierOpen || selectedId) && viewport.width > 900 ? workbenchWidth + 12 : 0
     const usableWidth = viewport.width - sideAllowance
     const bounds = sceneBoundsInRoot(activeScene)
     const sceneScale = sceneScaleInRoot(activeScene.id)
@@ -577,24 +691,32 @@ function App() {
     }
     cancelCameraAnimation()
     paintCamera(next, true)
-  }, [activeScene, cancelCameraAnimation, paintCamera, selectedId, viewport])
+  }, [activeScene, cancelCameraAnimation, frontierOpen, paintCamera, selectedId, viewport, workbenchWidth])
+
+  const replaceFrontierWithDetails = useCallback(() => {
+    frontierOpenerRef.current = null
+    setFrontierOpen(false)
+    setFrontierConceptId(null)
+  }, [])
 
   const selectNode = useCallback((node: MathNode) => {
     if (statusOf(node) !== 'locked') {
       setProgressStore((current) => advanceConceptProgress(current, node.id, 'discovered', new Date().toISOString()))
     }
+    replaceFrontierWithDetails()
     setSelectedId(node.id)
     if (activeSceneId !== 'root') setPinnedChildSceneId(activeSceneId)
     setSearchOpen(false)
     setQuery('')
-  }, [activeSceneId, statusOf])
+  }, [activeSceneId, replaceFrontierWithDetails, statusOf])
 
   const selectSpaceNode = useCallback((nodeId: string) => {
     if (!visibleSpaceNodeIds.has(nodeId)) return
+    replaceFrontierWithDetails()
     setSelectedSpaceNodeId(nodeId)
     setSearchOpen(false)
     setQuery('')
-  }, [visibleSpaceNodeIds])
+  }, [replaceFrontierWithDetails, visibleSpaceNodeIds])
 
   const closeDetails = useCallback(() => {
     setSelectedId(null)
@@ -679,11 +801,20 @@ function App() {
         new Date().toISOString(),
       ))
     }
+    replaceFrontierWithDetails()
     enterChildScene(hitScene.id, hit.node.id)
     setPinnedChildSceneId(hitScene.id)
     setSearchOpen(false)
     setQuery('')
-  }, [activeSceneId, enterChildScene, pixiVisualState.nonInteractiveNodeIds, progressStore, selectNode, statusOf])
+  }, [
+    activeSceneId,
+    enterChildScene,
+    pixiVisualState.nonInteractiveNodeIds,
+    progressStore,
+    replaceFrontierWithDetails,
+    selectNode,
+    statusOf,
+  ])
 
   const leaveScope = useCallback((manual: boolean) => {
     if (manual) {
@@ -750,10 +881,65 @@ function App() {
     setSelectedId(navigation.path[targetIndex + 1]?.ownerNodeId ?? transition.scene.initialNodeId)
   }, [applyNavigationTransition, cancelCameraAnimation, navigation.navigateTo, navigation.path])
 
+  const openFrontierRadar = useCallback((conceptId: string | null = null) => {
+    frontierOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : frontierTriggerRef.current
+    setFrontierConceptId(conceptId)
+    const scopedEntries = conceptId
+      ? defaultFrontierEntries.filter((entry) => entry.relatedConceptIds.includes(conceptId))
+      : defaultFrontierEntries
+    setFrontierMatchedConceptIds(new Set(scopedEntries.flatMap((entry) => entry.relatedConceptIds)))
+    setFrontierOpen(true)
+    setSearchOpen(false)
+    setShowLegend(false)
+  }, [])
+
+  const closeFrontierRadar = useCallback(() => {
+    setFrontierOpen(false)
+    window.requestAnimationFrame(() => {
+      const opener = frontierOpenerRef.current
+      if (opener?.isConnected) opener.focus()
+      else frontierTriggerRef.current?.focus()
+    })
+  }, [])
+
+  const handleFrontierVisibleConceptIdsChange = useCallback((conceptIds: readonly string[]) => {
+    setFrontierMatchedConceptIds(new Set(conceptIds))
+  }, [])
+
+  const locateFrontierConcept = useCallback((conceptId: string) => {
+    const spaceConceptId = conceptId === 'numbers'
+      ? 'quantity-arithmetic'
+      : conceptId === 'logic'
+        ? 'mathematical-logic'
+        : conceptId === 'sets'
+          ? 'set-theory'
+          : conceptId
+
+    if (mapViewMode === 'space3d' && allKnowledgeSpaceNodeById[spaceConceptId]) {
+      setActiveSpaceSubspaceId(null)
+      setSpaceDomainFilter(null)
+      setSelectedSpaceNodeId(spaceConceptId)
+      closeFrontierRadar()
+      return
+    }
+
+    const rootNode = sceneCatalog.root.nodeIndex[conceptId]
+    if (!rootNode) return
+    if (mapViewMode !== 'atlas2d') switchMapView('atlas2d')
+    if (activeSceneId !== 'root') goRoot()
+    setSelectedId(rootNode.id)
+    closeFrontierRadar()
+    window.requestAnimationFrame(() => {
+      animateCameraTo(cameraForNode(sceneCatalog.root, rootNode.id, viewport, 0.9, workbenchWidth))
+    })
+  }, [activeSceneId, animateCameraTo, closeFrontierRadar, goRoot, mapViewMode, switchMapView, viewport, workbenchWidth])
+
   const revealSelectedChild = useCallback(() => {
     if (!selectedChildScene || !selectedId) return
     setSelectedId(selectedId)
-    const lodViewportWidth = viewport.width > 800 ? viewport.width - 390 : viewport.width
+    const lodViewportWidth = viewport.width > 900 ? viewport.width - workbenchWidth - 12 : viewport.width
     const shortViewportSide = Math.min(lodViewportWidth, viewport.height)
     const entryScale = (shortViewportSide * (DEFAULT_LOD_POLICY.enterViewportRatio + 0.015)) / activeScene.nodeHeight
     const targetEffectiveScale = Math.max(
@@ -761,11 +947,16 @@ function App() {
       entryScale * DEFAULT_LOD_POLICY.portalButtonZoomMultiplier,
       DEFAULT_LOD_POLICY.revealEndScale / activeScene.cardScale,
     )
-    animateCameraTo(cameraForPortal(activeScene, selectedId, targetEffectiveScale, viewport))
-  }, [activeScene, animateCameraTo, selectedChildScene, selectedId, viewport])
+    animateCameraTo(cameraForPortal(activeScene, selectedId, targetEffectiveScale, viewport, workbenchWidth))
+  }, [activeScene, animateCameraTo, selectedChildScene, selectedId, viewport, workbenchWidth])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && frontierOpen) {
+        event.preventDefault()
+        closeFrontierRadar()
+        return
+      }
       if ((event.target as HTMLElement).tagName === 'INPUT') {
         if (event.key === 'Escape') {
           searchRef.current?.blur()
@@ -796,7 +987,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [closeDetails, closeSpaceDetails, exitScope, fitMap, mapViewMode, navigation.canExit, zoomAt])
+  }, [closeDetails, closeFrontierRadar, closeSpaceDetails, exitScope, fitMap, frontierOpen, mapViewMode, navigation.canExit, zoomAt])
 
   const schedulePan = () => {
     if (panFrameRef.current !== null) return
@@ -1070,6 +1261,18 @@ function App() {
         </div>
 
         <div className="top-actions">
+          <button
+            ref={frontierTriggerRef}
+            className={`frontier-trigger ${frontierOpen ? 'active' : ''}`}
+            aria-label={`前沿雷达，${defaultFrontierEntries.length} 条开放讨论`}
+            aria-controls="frontier-radar"
+            aria-expanded={frontierOpen}
+            onClick={() => frontierOpen ? closeFrontierRadar() : openFrontierRadar()}
+          >
+            <Radar size={16} />
+            <span className="frontier-trigger__label">前沿雷达</span>
+            <span className="frontier-trigger__count">{defaultFrontierEntries.length}</span>
+          </button>
           <div className="view-mode-switch" role="group" aria-label="地图视图">
             <button
               className={mapViewMode === 'atlas2d' ? 'active' : ''}
@@ -1096,6 +1299,28 @@ function App() {
           )}
         </div>
       </header>
+
+      {frontierOpen && (
+        <SideWorkbench
+          width={workbenchWidth}
+          label="前沿雷达工作台"
+          variant="frontier"
+          dark={mapViewMode === 'space3d' && spaceColorTheme === 'dark'}
+          onWidthChange={setWorkbenchWidth}
+        >
+          <FrontierRadar
+            open
+            focusConceptId={frontierConceptId}
+            focusConceptLabel={frontierConceptId ? frontierConceptLabels[frontierConceptId] : null}
+            conceptLabels={frontierConceptLabels}
+            dark={mapViewMode === 'space3d' && spaceColorTheme === 'dark'}
+            onClose={closeFrontierRadar}
+            onClearFocus={() => setFrontierConceptId(null)}
+            onLocateConcept={locateFrontierConcept}
+            onVisibleConceptIdsChange={handleFrontierVisibleConceptIdsChange}
+          />
+        </SideWorkbench>
+      )}
 
       {mapViewMode === 'atlas2d' && <ScopeBreadcrumbs
         path={navigation.path}
@@ -1160,7 +1385,7 @@ function App() {
             )
           })}
           <div className="lens-instructions">
-            <span>左拖平移</span><span>指针定点缩放</span><span>Alt / 右拖球心旋转</span><span>行走：WASD / Q / E</span>
+            <span>左拖平移</span><span>指针定点缩放</span><span>Alt / 右拖范围中心旋转</span><span>行走：WASD / Q / E</span>
           </div>
           <span className="sr-only" aria-live="polite">已切换到{activeLens.label}</span>
         </nav>
@@ -1240,7 +1465,8 @@ function App() {
               ref={pixiSurfaceRef}
               camera={transformRef.current}
               viewport={viewport}
-              panelOpen={selectedId !== null}
+              panelOpen={frontierOpen || selectedId !== null}
+              panelWidth={workbenchWidth}
               activeSceneId={activeSceneId}
               pinnedChildSceneId={pinnedChildSceneId}
               visualState={pixiVisualState}
@@ -1266,6 +1492,7 @@ function App() {
             <ThreeKnowledgeSurface
               ref={threeSurfaceRef}
               projection={spaceProjection}
+              cardFocus={spaceCardFocus}
               selectedNodeId={selectedSpaceNodeId && visibleSpaceNodeIds.has(selectedSpaceNodeId) ? selectedSpaceNodeId : null}
               walkingMode={spaceWalkingMode}
               fieldsVisible={spaceFieldsVisible}
@@ -1350,8 +1577,14 @@ function App() {
         }, true)
       }} />}
 
-      {mapViewMode === 'atlas2d' && selectedNode && selectedVisibility?.revealContent && (
-        <aside className="detail-panel" style={{ '--panel-color': domainById[selectedNode.domain].color } as React.CSSProperties}>
+      {!frontierOpen && mapViewMode === 'atlas2d' && selectedNode && selectedVisibility?.revealContent && (
+        <SideWorkbench
+          width={workbenchWidth}
+          label={`${selectedNode.title}知识卡片`}
+          variant="detail"
+          onWidthChange={setWorkbenchWidth}
+        >
+          <aside className="detail-panel" style={{ '--panel-color': domainById[selectedNode.domain].color } as React.CSSProperties}>
           <div className="panel-ruler" />
           <button className="panel-close" onClick={closeDetails} aria-label="关闭详情"><X size={19} /></button>
           <div className="panel-domain">
@@ -1395,6 +1628,14 @@ function App() {
                 <p>最近复核 {selectedContent.reviewedAt} · 下次复核 {selectedContent.reviewDue}</p>
               </details>
             </section>
+          )}
+
+          {selectedFrontierCount > 0 && (
+            <button className="frontier-context-link" onClick={() => openFrontierRadar(selectedNode.id)}>
+              <Radar size={18} />
+              <span><small>前沿动态</small><strong>{selectedFrontierCount} 条研究记录与这个知识点相连</strong></span>
+              <ChevronRight size={15} />
+            </button>
           )}
 
           <div className="tag-cloud" aria-label="知识标签">
@@ -1482,14 +1723,22 @@ function App() {
               statusOf(selectedNode) === 'available' ? <><Compass size={18} /> 标记为已掌握</> :
                 <><LockKeyhole size={17} /> 先完成 {selectedMissingPrerequisiteIds.length} 门前置</>}
           </button>
-        </aside>
+          </aside>
+        </SideWorkbench>
       )}
 
-      {mapViewMode === 'space3d' && selectedSpaceNode && selectedSpaceDomain && visibleSpaceNodeIds.has(selectedSpaceNode.id) && (
-        <aside
-          className="detail-panel knowledge-space-detail"
-          style={{ '--panel-color': selectedSpaceDomain.color } as React.CSSProperties}
+      {!frontierOpen && mapViewMode === 'space3d' && selectedSpaceNode && selectedSpaceDomain && visibleSpaceNodeIds.has(selectedSpaceNode.id) && (
+        <SideWorkbench
+          width={workbenchWidth}
+          label={`${selectedSpaceNode.title}知识卡片`}
+          variant="detail"
+          dark={spaceColorTheme === 'dark'}
+          onWidthChange={setWorkbenchWidth}
         >
+          <aside
+            className="detail-panel knowledge-space-detail"
+            style={{ '--panel-color': selectedSpaceDomain.color } as React.CSSProperties}
+          >
           <div className="panel-ruler" />
           <button className="panel-close" onClick={closeSpaceDetails} aria-label="关闭详情"><X size={19} /></button>
           <div className="panel-domain">
@@ -1513,6 +1762,14 @@ function App() {
               )}
             </div>
           </div>
+
+          {selectedSpaceFrontierConceptId && selectedSpaceFrontierCount > 0 && (
+            <button className="frontier-context-link" onClick={() => openFrontierRadar(selectedSpaceFrontierConceptId)}>
+              <Radar size={18} />
+              <span><small>前沿动态</small><strong>{selectedSpaceFrontierCount} 条研究记录与这个知识点相连</strong></span>
+              <ChevronRight size={15} />
+            </button>
+          )}
 
           <div className="tag-cloud" aria-label="知识标签">
             {selectedSpaceNode.domains.map((domainId) => {
@@ -1550,7 +1807,8 @@ function App() {
               ? '微积分内部节点沿前置关系排列。缩小镜头后，子域逐渐收起并恢复公共知识球。'
               : '此位置来自公开透镜投影。切换视角会改变空间邻近关系，知识点身份和关系数据保持一致。'}</p>
           </div>
-        </aside>
+          </aside>
+        </SideWorkbench>
       )}
 
       {mapViewMode === 'atlas2d' && showLegend && (
