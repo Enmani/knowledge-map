@@ -2,7 +2,7 @@
   "name": "knowledge-map",
   "private": true,
   "version": "0.1.0",
-  "description": "支持前置关系、标签场域、连续语义缩放与学习进度的互动数学知识地图。",
+  "description": "连接数学、物理、化学和生物的二维知识地图与三维公共知识空间。",
   "license": "Apache-2.0",
   "author": "Enmani",
   "repository": {
@@ -18,7 +18,11 @@
     "knowledge-graph",
     "semantic-zoom",
     "education",
-    "pixijs"
+    "pixijs",
+    "threejs",
+    "physics",
+    "chemistry",
+    "biology"
   ],
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -27,7 +31,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test:smoke": "node src/engine/smoke-test.mjs && node src/frontier/smoke-test.mjs",
+    "test:smoke": "node src/engine/smoke-test.mjs && node src/frontier/smoke-test.mjs && node src/knowledge/space3d/smoke-test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -35,13 +39,15 @@
     "lucide-react": "^1.26.0",
     "pixi.js": "^8.19.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.4",
     "@types/d3-interpolate": "^3.0.4",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.1",
+    "@vitejs/plugin-react": "^6.0.4",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
   }

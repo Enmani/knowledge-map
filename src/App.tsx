@@ -5,18 +5,21 @@ import {
   ChevronRight,
   CircleHelp,
   Compass,
+  Filter,
   Focus,
   LockKeyhole,
   Map as MapIcon,
   Minus,
+  Moon,
   Plus,
   RotateCcw,
   Search,
   Sparkles,
+  Sun,
   X,
 } from 'lucide-react'
 import { interpolateZoom, type ZoomView } from 'd3-interpolate'
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { frontierStatusLabels, getKnowledgeContentForConcept } from './content'
 import {
   domainById,
@@ -65,6 +68,20 @@ import { loadProgressFromStorage, saveProgressToStorage } from './persistence/pr
 import type { PixiHitTestResult, PixiVisualState } from './renderers/pixi'
 import { WidgetRenderer } from './widgets'
 import {
+  getKnowledgeLens,
+  knowledgeLenses,
+  knowledgeSpaceEdges,
+  knowledgeSpaceNodes,
+  projectKnowledgeSpace,
+  scienceDomains,
+  type KnowledgeLensId,
+  type KnowledgeRelationType,
+  type ScienceDomainId,
+} from './knowledge/space3d'
+import type { ThreeKnowledgeSurfaceHandle } from './features/space3d'
+import { calculusThreeSubspace } from './features/space3d/calculusSubspace'
+import type { SpaceColorTheme } from './renderers/three'
+import {
   completeWheelZoom,
   createWheelZoomGesture,
   createZoomTarget,
@@ -76,6 +93,8 @@ import {
 } from './features/map/wheelZoom'
 
 type Transform = { x: number; y: number; scale: number }
+type MapViewMode = 'atlas2d' | 'space3d'
+type SpaceDomainFilterMode = 'temporary' | 'focus'
 type LearningStatus = 'mastered' | 'available' | 'locked'
 type SceneSelectionContext = {
   upstream: ReadonlySet<string>
@@ -98,6 +117,32 @@ const EMPTY_ID_SET: ReadonlySet<string> = new Set<string>()
 const atlasNodeIndex: Readonly<Record<string, MathNode>> = Object.fromEntries(
   Object.values(sceneCatalog).flatMap((scene) => scene.nodes.map((node) => [node.id, node])),
 )
+
+const ThreeKnowledgeSurface = lazy(() => import('./features/space3d').then((module) => ({
+  default: module.ThreeKnowledgeSurface,
+})))
+
+const scienceDomainById = Object.fromEntries(
+  scienceDomains.map((domain) => [domain.id, domain]),
+)
+const threeKnowledgeSubspaces = [calculusThreeSubspace] as const
+const threeSubspaceNodes = threeKnowledgeSubspaces.flatMap((subspace) => (
+  subspace.nodes.map(({ node }) => node)
+))
+const threeSubspaceEdges = threeKnowledgeSubspaces.flatMap(({ edges }) => edges)
+const allKnowledgeSpaceNodes = [...knowledgeSpaceNodes, ...threeSubspaceNodes]
+const allKnowledgeSpaceEdges = [...knowledgeSpaceEdges, ...threeSubspaceEdges]
+const allKnowledgeSpaceNodeById = Object.fromEntries(
+  allKnowledgeSpaceNodes.map((node) => [node.id, node]),
+)
+
+const relationTypeLabels: Readonly<Record<KnowledgeRelationType, string>> = {
+  prerequisite: '前置',
+  application: '应用',
+  analogy: '类比',
+  historical: '历史',
+  'shared-model': '共享模型',
+}
 
 function getInitialProgress(): ProgressStoreState {
   return loadProgressFromStorage(window.localStorage, knownConceptIds, {
@@ -195,8 +240,10 @@ function cameraForPortal(
 
 function App() {
   const pixiSurfaceRef = useRef<PixiMapSurfaceHandle>(null)
+  const threeSurfaceRef = useRef<ThreeKnowledgeSurfaceHandle>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const zoomValueRef = useRef<HTMLSpanElement>(null)
+  const spaceZoomValueRef = useRef<HTMLSpanElement>(null)
   const lastZoomPercentRef = useRef<number | null>(null)
   const pointerRef = useRef<PanPointer | null>(null)
   const panDeltaRef = useRef({ x: 0, y: 0 })
@@ -211,6 +258,18 @@ function App() {
   const suppressNextCanvasClickRef = useRef(false)
   const navigation = useScopeNavigation()
   const { activeScene, activeSceneId } = navigation
+  const [mapViewMode, setMapViewMode] = useState<MapViewMode>('atlas2d')
+  const [activeLensId, setActiveLensId] = useState<KnowledgeLensId>('world')
+  const [spaceDomainFilter, setSpaceDomainFilter] = useState<ScienceDomainId | null>(null)
+  const [spaceDomainFilterMode, setSpaceDomainFilterMode] = useState<SpaceDomainFilterMode>('temporary')
+  const [spaceWalkingMode, setSpaceWalkingMode] = useState(false)
+  const [spaceFieldsVisible, setSpaceFieldsVisible] = useState(true)
+  const [activeSpaceSubspaceId, setActiveSpaceSubspaceId] = useState<string | null>(null)
+  const [spaceColorTheme, setSpaceColorTheme] = useState<SpaceColorTheme>(() => (
+    localStorage.getItem('knowledge-space-color-theme') === 'dark' ? 'dark' : 'light'
+  ))
+  const [selectedSpaceNodeId, setSelectedSpaceNodeId] = useState<string | null>(null)
+  const [threeFailure, setThreeFailure] = useState<Error | null>(null)
   const [transform, setTransform] = useState<Transform>(() => {
     const initialTransform = cameraForNode(activeScene, activeScene.initialNodeId, {
       width: window.innerWidth,
@@ -236,6 +295,38 @@ function App() {
   const sceneNodes = activeScene.nodes
   const nodeIndex = activeScene.nodeIndex
   const selectedNode = selectedId ? nodeIndex[selectedId] ?? null : null
+  const activeSpaceSubspace = activeSpaceSubspaceId
+    ? threeKnowledgeSubspaces.find(({ id }) => id === activeSpaceSubspaceId) ?? null
+    : null
+  const selectedSpaceNode = selectedSpaceNodeId ? allKnowledgeSpaceNodeById[selectedSpaceNodeId] ?? null : null
+  const selectedSpaceDomain = selectedSpaceNode ? scienceDomainById[selectedSpaceNode.primaryDomain] : null
+  const activeLens = getKnowledgeLens(activeLensId)
+  const activeSpaceFilterDomain = spaceDomainFilter ? scienceDomainById[spaceDomainFilter] : null
+  const spaceProjection = useMemo(() => projectKnowledgeSpace(activeLensId, {
+    domainFilter: spaceDomainFilter,
+    filterMode: spaceDomainFilter ? spaceDomainFilterMode : 'none',
+  }), [activeLensId, spaceDomainFilter, spaceDomainFilterMode])
+  const selectedSpaceProjection = selectedSpaceNodeId && !activeSpaceSubspace
+    ? spaceProjection.nodes.find((projected) => projected.node.id === selectedSpaceNodeId) ?? null
+    : null
+  const visibleSpaceNodeIds = useMemo(
+    () => activeSpaceSubspace
+      ? new Set(activeSpaceSubspace.nodes.map(({ node }) => node.id))
+      : new Set(
+        spaceProjection.nodes
+          .filter((node) => node.visible && node.interactive)
+          .map((node) => node.node.id),
+      ),
+    [activeSpaceSubspace, spaceProjection],
+  )
+  const selectedSpaceRelations = useMemo(() => {
+    if (!selectedSpaceNodeId) return []
+    return allKnowledgeSpaceEdges.filter((edge) => (
+      edge.source === selectedSpaceNodeId && visibleSpaceNodeIds.has(edge.target)
+    ) || (
+      edge.target === selectedSpaceNodeId && visibleSpaceNodeIds.has(edge.source)
+    ))
+  }, [selectedSpaceNodeId, visibleSpaceNodeIds])
   const selectedVisibility = selectedNode ? getFogVisibility(knowledgeAtlas, progressStore, selectedNode.id) : null
   const selectedContent = selectedNode ? getKnowledgeContentForConcept(selectedNode.id) : undefined
   const mastered = useMemo(() => new Set(
@@ -268,7 +359,7 @@ function App() {
     [sceneNodes, statusOf],
   )
 
-  const searchResults = useMemo(() => {
+  const mathSearchResults = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     if (!normalized) return []
     return sceneNodes
@@ -278,6 +369,30 @@ function App() {
       )
       .slice(0, 7)
   }, [progressStore, query, sceneNodes])
+
+  const spaceSearchResults = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return []
+    const candidates = activeSpaceSubspace
+      ? activeSpaceSubspace.nodes.map(({ node }) => node)
+      : knowledgeSpaceNodes
+    return candidates
+      .filter((node) => visibleSpaceNodeIds.has(node.id))
+      .filter((node) => [
+        node.title,
+        node.englishTitle,
+        node.summary,
+        ...node.tags,
+        ...node.domains.map((domainId) => scienceDomainById[domainId]?.label ?? domainId),
+      ].some((value) => value.toLowerCase().includes(normalized)))
+      .slice(0, 7)
+  }, [activeSpaceSubspace, query, visibleSpaceNodeIds])
+
+  useEffect(() => {
+    if (selectedSpaceNodeId && !visibleSpaceNodeIds.has(selectedSpaceNodeId)) {
+      setSelectedSpaceNodeId(null)
+    }
+  }, [selectedSpaceNodeId, visibleSpaceNodeIds])
 
   const activeSceneSelectionContext = useMemo(
     () => buildSceneSelectionContext(activeScene, selectedId),
@@ -352,6 +467,10 @@ function App() {
   useEffect(() => {
     saveProgressToStorage(window.localStorage, progressStore)
   }, [progressStore])
+
+  useEffect(() => {
+    window.localStorage.setItem('knowledge-space-color-theme', spaceColorTheme)
+  }, [spaceColorTheme])
 
   useEffect(() => {
     if (progressStore.mode === 'free' || !selectedNode) return
@@ -470,9 +589,55 @@ function App() {
     setQuery('')
   }, [activeSceneId, statusOf])
 
+  const selectSpaceNode = useCallback((nodeId: string) => {
+    if (!visibleSpaceNodeIds.has(nodeId)) return
+    setSelectedSpaceNodeId(nodeId)
+    setSearchOpen(false)
+    setQuery('')
+  }, [visibleSpaceNodeIds])
+
   const closeDetails = useCallback(() => {
     setSelectedId(null)
   }, [])
+
+  const closeSpaceDetails = useCallback(() => {
+    setSelectedSpaceNodeId(null)
+    window.requestAnimationFrame(() => threeSurfaceRef.current?.focus())
+  }, [])
+
+  const handleSpaceScopeChange = useCallback((subspaceId: string | null) => {
+    setActiveSpaceSubspaceId(subspaceId)
+    setSelectedSpaceNodeId(null)
+    setSearchOpen(false)
+    setQuery('')
+  }, [])
+
+  const switchMapView = useCallback((nextMode: MapViewMode) => {
+    if (nextMode === mapViewMode) return
+    cancelCameraAnimation()
+    const pointer = pointerRef.current
+    if (pointer) {
+      try {
+        if (pointer.captureTarget.hasPointerCapture(pointer.id)) {
+          pointer.captureTarget.releasePointerCapture(pointer.id)
+        }
+      } catch {
+        // Pointer capture can already be gone when a mode button is pressed.
+      }
+      if (pointer.captureTarget instanceof HTMLElement) {
+        pointer.captureTarget.classList.remove('is-panning')
+        if (pointer.previousCursor !== null) pointer.captureTarget.style.cursor = pointer.previousCursor
+      }
+    }
+    pointerRef.current = null
+    panDeltaRef.current = { x: 0, y: 0 }
+    setSearchOpen(false)
+    setQuery('')
+    setShowLegend(false)
+    if (activeSpaceSubspaceId) setSelectedSpaceNodeId(null)
+    setActiveSpaceSubspaceId(null)
+    setMapViewMode(nextMode)
+  }, [activeSpaceSubspaceId, cancelCameraAnimation, mapViewMode])
 
   const applyNavigationTransition = useCallback((transition: ReturnType<typeof navigation.enter>) => {
     if (!transition) return
@@ -614,8 +779,13 @@ function App() {
         searchRef.current?.focus()
         setSearchOpen(true)
       } else if (event.key === 'Escape') {
-        if (navigation.canExit) exitScope()
+        if (mapViewMode === 'space3d') closeSpaceDetails()
+        else if (navigation.canExit) exitScope()
         else closeDetails()
+      } else if (mapViewMode === 'space3d' && event.key === '0') {
+        threeSurfaceRef.current?.resetCamera()
+      } else if (mapViewMode === 'space3d') {
+        return
       } else if (event.key === '+' || event.key === '=') {
         zoomAt(transformRef.current.scale * 1.2)
       } else if (event.key === '-') {
@@ -626,7 +796,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [closeDetails, exitScope, fitMap, navigation.canExit, zoomAt])
+  }, [closeDetails, closeSpaceDetails, exitScope, fitMap, mapViewMode, navigation.canExit, zoomAt])
 
   const schedulePan = () => {
     if (panFrameRef.current !== null) return
@@ -807,6 +977,12 @@ function App() {
     })
   }
 
+  const selectSpaceDomainFilter = (domainId: ScienceDomainId | null) => {
+    setSpaceDomainFilter(domainId)
+    setSearchOpen(false)
+    setQuery('')
+  }
+
   const toggleMastered = (node: MathNode) => {
     const status = statusOf(node)
     if (status === 'locked' || status === 'mastered') return
@@ -844,13 +1020,13 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${mapViewMode === 'space3d' ? `app-shell--space3d space-theme--${spaceColorTheme}` : ''}`}>
       <header className="topbar">
-        <div className="brand" aria-label="数域数学地图">
+        <div className="brand" aria-label="数域理科知识空间">
           <div className="brand-mark">M</div>
           <div>
             <strong>数域</strong>
-            <span>MATHEMATICAL ATLAS</span>
+            <span>{mapViewMode === 'atlas2d' ? 'MATHEMATICAL ATLAS' : 'SCIENCE KNOWLEDGE SPACE'}</span>
           </div>
         </div>
 
@@ -861,43 +1037,74 @@ function App() {
             value={query}
             onFocus={() => setSearchOpen(true)}
             onChange={(event) => { setQuery(event.target.value); setSearchOpen(true) }}
-            placeholder="寻找一个知识点…"
-            aria-label={`搜索${activeScene.title}知识`}
+            placeholder={mapViewMode === 'atlas2d' ? '寻找一个数学知识点…' : '寻找一个理科知识点…'}
+            aria-label={mapViewMode === 'atlas2d' ? `搜索${activeScene.title}知识` : '搜索三维公共知识空间'}
           />
           <kbd>/</kbd>
           {searchOpen && query && (
             <div className="search-results">
-              {searchResults.length ? searchResults.map((node) => (
-                <button key={node.id} onClick={() => selectNode(node)}>
-                  <span className="result-symbol" style={{ color: domainById[node.domain].color }}>
-                    {domainById[node.domain].symbol}
-                  </span>
-                  <span><strong>{node.title}</strong><small>{domainById[node.domain].name} · {levelNames[node.level]}</small></span>
-                  <ChevronRight size={15} />
-                </button>
-              )) : <p className="no-result">地图上还没有这个知识点</p>}
+              {mapViewMode === 'atlas2d' ? (
+                mathSearchResults.length ? mathSearchResults.map((node) => (
+                  <button key={node.id} onClick={() => selectNode(node)}>
+                    <span className="result-symbol" style={{ color: domainById[node.domain].color }}>
+                      {domainById[node.domain].symbol}
+                    </span>
+                    <span><strong>{node.title}</strong><small>{domainById[node.domain].name} · {levelNames[node.level]}</small></span>
+                    <ChevronRight size={15} />
+                  </button>
+                )) : <p className="no-result">地图上还没有这个知识点</p>
+              ) : (
+                spaceSearchResults.length ? spaceSearchResults.map((node) => {
+                  const domain = scienceDomainById[node.primaryDomain]
+                  return (
+                    <button key={node.id} onClick={() => selectSpaceNode(node.id)}>
+                      <span className="result-symbol" style={{ color: domain.color }}>{domain.shortLabel}</span>
+                      <span><strong>{node.title}</strong><small>{domain.label} · {levelNames[node.level]}</small></span>
+                      <ChevronRight size={15} />
+                    </button>
+                  )
+                }) : <p className="no-result">公共知识空间中还没有这个知识点</p>
+              )}
             </div>
           )}
         </div>
 
         <div className="top-actions">
-          <button className="quiet-button desktop-only" onClick={() => setShowLegend((value) => !value)}>
-            <CircleHelp size={17} /> 图例
-          </button>
-          <button className="next-button" onClick={goNext} disabled={!availableNodes.length}>
-            <Compass size={17} /> 下一站
-          </button>
+          <div className="view-mode-switch" role="group" aria-label="地图视图">
+            <button
+              className={mapViewMode === 'atlas2d' ? 'active' : ''}
+              aria-label="二维地图"
+              aria-pressed={mapViewMode === 'atlas2d'}
+              onClick={() => switchMapView('atlas2d')}
+            ><MapIcon size={15} /><span>二维地图</span></button>
+            <button
+              className={mapViewMode === 'space3d' ? 'active' : ''}
+              aria-label="三维空间"
+              aria-pressed={mapViewMode === 'space3d'}
+              onClick={() => switchMapView('space3d')}
+            ><Sparkles size={15} /><span>三维空间</span></button>
+          </div>
+          {mapViewMode === 'atlas2d' && (
+            <>
+              <button className="quiet-button desktop-only" onClick={() => setShowLegend((value) => !value)}>
+                <CircleHelp size={17} /> 图例
+              </button>
+              <button className="next-button" onClick={goNext} disabled={!availableNodes.length}>
+                <Compass size={17} /> 下一站
+              </button>
+            </>
+          )}
         </div>
       </header>
 
-      <ScopeBreadcrumbs
+      {mapViewMode === 'atlas2d' && <ScopeBreadcrumbs
         path={navigation.path}
         onNavigate={navigateScope}
         onExit={exitScope}
         onRoot={goRoot}
-      />
+      />}
 
-      <aside className="domain-rail" aria-label="数学领域筛选">
+      {mapViewMode === 'atlas2d' && <aside className="domain-rail" aria-label="数学领域筛选">
         <div className="rail-heading">
           <span>领域</span>
           <small>{activeDomains.size}/7</small>
@@ -927,58 +1134,212 @@ function App() {
         <button className="mode-toggle" onClick={toggleProgressMode}>
           <Compass size={13} /> {progressStore.mode === 'free' ? '切换到探索模式' : '切换到自由模式'}
         </button>
-      </aside>
+      </aside>}
+
+      {mapViewMode === 'space3d' && (
+        <nav className="knowledge-lens-rail" aria-label="公共知识透镜">
+          <div className="lens-rail-heading">
+            <span>观察视角</span>
+            <small>PUBLIC LENS</small>
+          </div>
+          {knowledgeLenses.map((lens) => {
+            const focusedDomain = lens.focusDomains.length === 1 ? scienceDomainById[lens.focusDomains[0]] : null
+            return (
+              <button
+                key={lens.id}
+                className={activeLensId === lens.id ? 'active' : ''}
+                style={{ '--lens-color': focusedDomain?.color ?? '#7a5d49' } as React.CSSProperties}
+                aria-label={`${lens.label}：${lens.description}`}
+                aria-pressed={activeLensId === lens.id}
+                onClick={() => setActiveLensId(lens.id)}
+                title={lens.description}
+              >
+                <span className="lens-symbol">{focusedDomain?.shortLabel ?? (lens.id === 'bridges' ? '↔' : '◎')}</span>
+                <span><strong>{lens.label}</strong><small>{lens.description}</small></span>
+              </button>
+            )
+          })}
+          <div className="lens-instructions">
+            <span>左拖平移</span><span>指针定点缩放</span><span>Alt / 右拖球心旋转</span><span>行走：WASD / Q / E</span>
+          </div>
+          <span className="sr-only" aria-live="polite">已切换到{activeLens.label}</span>
+        </nav>
+      )}
+
+      {mapViewMode === 'space3d' && (
+        <aside className="space-filter-panel" aria-label="三维领域筛选与专业聚焦">
+          <div className="space-filter-heading">
+            <span><Filter size={13} /> 领域范围</span>
+            <small>{activeSpaceFilterDomain?.label ?? '全部领域'}</small>
+          </div>
+          <div className="space-filter-modes" role="group" aria-label="筛选布局方式">
+            <button
+              className={spaceDomainFilterMode === 'temporary' ? 'active' : ''}
+              aria-pressed={spaceDomainFilterMode === 'temporary'}
+              onClick={() => setSpaceDomainFilterMode('temporary')}
+            >临时筛选</button>
+            <button
+              className={spaceDomainFilterMode === 'focus' ? 'active' : ''}
+              aria-pressed={spaceDomainFilterMode === 'focus'}
+              onClick={() => setSpaceDomainFilterMode('focus')}
+            >专业聚焦</button>
+          </div>
+          <div className="space-filter-domains" role="group" aria-label="筛选领域">
+            <button
+              className={spaceDomainFilter === null ? 'active' : ''}
+              aria-pressed={spaceDomainFilter === null}
+              onClick={() => selectSpaceDomainFilter(null)}
+            >全部</button>
+            {scienceDomains.map((domain) => (
+              <button
+                key={domain.id}
+                className={spaceDomainFilter === domain.id ? 'active' : ''}
+                style={{ '--filter-color': domain.color } as React.CSSProperties}
+                aria-label={`只看${domain.label}`}
+                aria-pressed={spaceDomainFilter === domain.id}
+                onClick={() => selectSpaceDomainFilter(domain.id)}
+              ><span className="filter-domain-short">{domain.shortLabel}</span><span className="filter-domain-label">{domain.label}</span></button>
+            ))}
+          </div>
+          <p className="space-filter-explanation">
+            {!activeSpaceFilterDomain
+              ? '完整知识球保留公共基准排列。'
+              : spaceDomainFilterMode === 'temporary'
+                ? `仅显示${activeSpaceFilterDomain.label}相关知识，节点保持公共坐标。`
+                : `${activeSpaceFilterDomain.label}节点重新分配球面方向，基础半径保持稳定。`}
+          </p>
+          <span className="sr-only" aria-live="polite">
+            {activeSpaceFilterDomain ? `已${spaceDomainFilterMode === 'focus' ? '聚焦' : '筛选'}${activeSpaceFilterDomain.label}` : '已显示全部领域'}
+          </span>
+        </aside>
+      )}
 
       <div
-        className="canvas"
+        className={`canvas ${mapViewMode === 'space3d' ? 'canvas--space3d' : ''}`}
         style={{ userSelect: 'none' }}
-        onPointerDownCapture={onPointerDownCapture}
-        onPointerMove={onPointerMove}
-        onPointerUp={endPan}
-        onPointerCancel={endPan}
-        onLostPointerCapture={endPan}
-        onClickCapture={onCanvasClickCapture}
-        onDragStart={(event) => event.preventDefault()}
-        onWheel={onWheel}
+        onPointerDownCapture={mapViewMode === 'atlas2d' ? onPointerDownCapture : undefined}
+        onPointerMove={mapViewMode === 'atlas2d' ? onPointerMove : undefined}
+        onPointerUp={mapViewMode === 'atlas2d' ? endPan : undefined}
+        onPointerCancel={mapViewMode === 'atlas2d' ? endPan : undefined}
+        onLostPointerCapture={mapViewMode === 'atlas2d' ? endPan : undefined}
+        onClickCapture={mapViewMode === 'atlas2d' ? onCanvasClickCapture : undefined}
+        onDragStart={mapViewMode === 'atlas2d' ? (event) => event.preventDefault() : undefined}
+        onWheel={mapViewMode === 'atlas2d' ? onWheel : undefined}
       >
         <div className="paper-grain" />
-        {pixiFailure ? (
+        {mapViewMode === 'atlas2d' ? (
+          pixiFailure ? (
+            <section className="map-render-error" role="alert">
+              <strong>地图无法启动</strong>
+              <p>当前浏览器没有成功创建 WebGL 渲染器。</p>
+              <small>{pixiFailure.message}</small>
+              <button onClick={() => setPixiFailure(null)}>重新尝试</button>
+            </section>
+          ) : (
+            <PixiMapSurface
+              ref={pixiSurfaceRef}
+              camera={transformRef.current}
+              viewport={viewport}
+              panelOpen={selectedId !== null}
+              activeSceneId={activeSceneId}
+              pinnedChildSceneId={pinnedChildSceneId}
+              visualState={pixiVisualState}
+              onScopeEvent={(event) => {
+                scopeTransitionHandlerRef.current?.(event.revealProgress, event.embedding)
+              }}
+              onReady={() => pixiSurfaceRef.current?.paintCamera(transformRef.current)}
+              onError={(error) => {
+                console.error('PixiJS WebGL 地图初始化失败。', error)
+                setPixiFailure(error)
+              }}
+            />
+          )
+        ) : threeFailure ? (
           <section className="map-render-error" role="alert">
-            <strong>地图无法启动</strong>
-            <p>当前浏览器没有成功创建 WebGL 渲染器。</p>
-            <small>{pixiFailure.message}</small>
-            <button onClick={() => setPixiFailure(null)}>重新尝试</button>
+            <strong>三维知识空间无法启动</strong>
+            <p>当前浏览器没有成功创建 Three.js WebGL 渲染器。</p>
+            <small>{threeFailure.message}</small>
+            <button onClick={() => setThreeFailure(null)}>重新尝试</button>
           </section>
         ) : (
-          <PixiMapSurface
-            ref={pixiSurfaceRef}
-            camera={transformRef.current}
-            viewport={viewport}
-            panelOpen={selectedId !== null}
-            activeSceneId={activeSceneId}
-            pinnedChildSceneId={pinnedChildSceneId}
-            visualState={pixiVisualState}
-            onScopeEvent={(event) => {
-              scopeTransitionHandlerRef.current?.(event.revealProgress, event.embedding)
-            }}
-            onReady={() => pixiSurfaceRef.current?.paintCamera(transformRef.current)}
-            onError={(error) => {
-              console.error('PixiJS WebGL 地图初始化失败。', error)
-              setPixiFailure(error)
-            }}
-          />
+          <Suspense fallback={<div className="space-loading">正在建立公共知识空间…</div>}>
+            <ThreeKnowledgeSurface
+              ref={threeSurfaceRef}
+              projection={spaceProjection}
+              selectedNodeId={selectedSpaceNodeId && visibleSpaceNodeIds.has(selectedSpaceNodeId) ? selectedSpaceNodeId : null}
+              walkingMode={spaceWalkingMode}
+              fieldsVisible={spaceFieldsVisible}
+              colorTheme={spaceColorTheme}
+              subspaces={threeKnowledgeSubspaces}
+              onSelectNode={selectSpaceNode}
+              onBlankClick={closeSpaceDetails}
+              onScopeChange={handleSpaceScopeChange}
+              onCameraChange={(camera) => {
+                if (spaceZoomValueRef.current) spaceZoomValueRef.current.textContent = `${camera.zoomPercent}%`
+              }}
+              onError={(error) => {
+                console.error('Three.js WebGL 知识空间初始化失败。', error)
+                setThreeFailure(error)
+              }}
+            />
+          </Suspense>
         )}
       </div>
 
-      <div className="zoom-controls" aria-label="画布控制">
+      {mapViewMode === 'atlas2d' && <div className="zoom-controls" aria-label="画布控制">
         <button onClick={() => zoomAt(transformRef.current.scale * 1.2)} title="放大"><Plus size={18} /></button>
         <span ref={zoomValueRef}>{Math.round(transform.scale * 100)}%</span>
         <button onClick={() => zoomAt(transformRef.current.scale / 1.2)} title="缩小"><Minus size={18} /></button>
         <i />
         <button onClick={fitMap} title="显示全部"><Focus size={18} /></button>
-      </div>
+      </div>}
 
-      <MiniMap scene={activeScene} transform={minimapTransform} viewport={viewport} activeTag={activeTag} onNavigate={(x, y) => {
+      {mapViewMode === 'space3d' && (
+        <div className="space-camera-controls" aria-label="三维相机状态">
+          <span ref={spaceZoomValueRef}>100%</span>
+          {activeSpaceSubspace && (
+            <>
+              <i />
+              <span className="space-scope-chip">{activeSpaceSubspace.title}内部</span>
+            </>
+          )}
+          <i />
+          <button onClick={() => threeSurfaceRef.current?.resetCamera()} title="重置三维视角">
+            <Focus size={17} /> 重置视角
+          </button>
+          <i />
+          <button
+            className={spaceWalkingMode ? 'active' : ''}
+            aria-pressed={spaceWalkingMode}
+            onClick={() => setSpaceWalkingMode((enabled) => !enabled)}
+            title="开启后使用 WASD 行走，Q 上升，E 下降"
+          >
+            <Compass size={16} /> 行走模式
+          </button>
+          <button
+            className={spaceFieldsVisible ? 'active' : ''}
+            aria-pressed={spaceFieldsVisible}
+            onClick={() => setSpaceFieldsVisible((visible) => !visible)}
+            title="显示或隐藏颜色场域"
+          >
+            <Sparkles size={16} /> 颜色场域
+          </button>
+          <i />
+          <button
+            className={spaceColorTheme === 'dark' ? 'active' : ''}
+            aria-pressed={spaceColorTheme === 'dark'}
+            onClick={() => setSpaceColorTheme((theme) => theme === 'dark' ? 'light' : 'dark')}
+            title={spaceColorTheme === 'dark' ? '切换到浅色界面' : '切换到深色界面'}
+          >
+            {spaceColorTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            <span className="space-theme-label">
+              {spaceColorTheme === 'dark' ? '浅色界面' : '深色界面'}
+            </span>
+          </button>
+        </div>
+      )}
+
+      {mapViewMode === 'atlas2d' && <MiniMap scene={activeScene} transform={minimapTransform} viewport={viewport} activeTag={activeTag} onNavigate={(x, y) => {
         const rootPoint = mapScenePointToRoot(activeSceneId, { x, y })
         cancelCameraAnimation()
         const current = transformRef.current
@@ -987,9 +1348,9 @@ function App() {
           x: viewport.width / 2 - rootPoint.x * current.scale,
           y: viewport.height / 2 - rootPoint.y * current.scale,
         }, true)
-      }} />
+      }} />}
 
-      {selectedNode && selectedVisibility?.revealContent && (
+      {mapViewMode === 'atlas2d' && selectedNode && selectedVisibility?.revealContent && (
         <aside className="detail-panel" style={{ '--panel-color': domainById[selectedNode.domain].color } as React.CSSProperties}>
           <div className="panel-ruler" />
           <button className="panel-close" onClick={closeDetails} aria-label="关闭详情"><X size={19} /></button>
@@ -1124,7 +1485,75 @@ function App() {
         </aside>
       )}
 
-      {showLegend && (
+      {mapViewMode === 'space3d' && selectedSpaceNode && selectedSpaceDomain && visibleSpaceNodeIds.has(selectedSpaceNode.id) && (
+        <aside
+          className="detail-panel knowledge-space-detail"
+          style={{ '--panel-color': selectedSpaceDomain.color } as React.CSSProperties}
+        >
+          <div className="panel-ruler" />
+          <button className="panel-close" onClick={closeSpaceDetails} aria-label="关闭详情"><X size={19} /></button>
+          <div className="panel-domain">
+            <span>{selectedSpaceDomain.shortLabel}</span>
+            {selectedSpaceDomain.label} · {levelNames[selectedSpaceNode.level]}
+          </div>
+          <h1>{selectedSpaceNode.title}</h1>
+          <p className="english-name">{selectedSpaceNode.englishTitle}</p>
+          <p className="node-summary">{selectedSpaceNode.summary}</p>
+
+          <div className="space-perspective-note">
+            <Sparkles size={17} />
+            <div>
+              <small>{activeSpaceSubspace ? '当前三维子域' : '当前公共视角'}</small>
+              <strong>{activeSpaceSubspace?.title ?? activeLens.label}</strong>
+              <p>{activeSpaceSubspace
+                ? '内部节点随父节点的屏幕投影尺寸连续显现，空间位置锚定在微积分节点附近。'
+                : activeLens.description}</p>
+              {selectedSpaceProjection && (
+                <p>前置深度 {selectedSpaceProjection.knowledgeDepth} · 球心距离 {selectedSpaceProjection.radius.toFixed(1)}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="tag-cloud" aria-label="知识标签">
+            {selectedSpaceNode.domains.map((domainId) => {
+              const domain = scienceDomainById[domainId]
+              return <span key={domainId} style={{ '--tag-color': domain.color } as React.CSSProperties}>{domain.label}</span>
+            })}
+            {selectedSpaceNode.tags.map((tag) => <span key={tag}>#{tag}</span>)}
+          </div>
+
+          <section className="panel-section">
+            <div className="section-heading">
+              <span><ArrowRight size={14} /> {activeSpaceSubspace ? '子域前置关系' : '公共知识关系'}</span>
+              <small>{selectedSpaceRelations.length}</small>
+            </div>
+            <div className="space-relation-list">
+              {selectedSpaceRelations.map((edge) => {
+                const outgoing = edge.source === selectedSpaceNode.id
+                const related = allKnowledgeSpaceNodeById[outgoing ? edge.target : edge.source]
+                if (!related) return null
+                const relatedDomain = scienceDomainById[related.primaryDomain]
+                return (
+                  <button key={edge.id} onClick={() => selectSpaceNode(related.id)}>
+                    <span className="space-relation-direction">{outgoing ? '→' : '←'}</span>
+                    <span><strong>{related.title}</strong><small>{edge.label ?? relationTypeLabels[edge.type]} · {relatedDomain.label}</small></span>
+                    <ChevronRight size={15} />
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          <div className="space-public-note">
+            <strong>{activeSpaceSubspace ? '子域知识记录' : '公共知识记录'}</strong>
+            <p>{activeSpaceSubspace
+              ? '微积分内部节点沿前置关系排列。缩小镜头后，子域逐渐收起并恢复公共知识球。'
+              : '此位置来自公开透镜投影。切换视角会改变空间邻近关系，知识点身份和关系数据保持一致。'}</p>
+          </div>
+        </aside>
+      )}
+
+      {mapViewMode === 'atlas2d' && showLegend && (
         <div className="legend-popover">
           <div><span className="legend-node mastered"><Check size={11} /></span><p><strong>已掌握</strong><small>计入你的探索进度</small></p></div>
           <div><span className="legend-node available" /><p><strong>可以学习</strong><small>所有前置均已完成</small></p></div>

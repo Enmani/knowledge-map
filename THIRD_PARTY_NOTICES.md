@@ -4,7 +4,7 @@
 
 | 软件 | 许可 |
 | --- | --- |
-| React、React DOM、PixiJS、Vite、@vitejs/plugin-react | MIT |
+| React、React DOM、PixiJS、Three.js、Vite、@vitejs/plugin-react | MIT |
 | TypeScript | Apache-2.0 |
 | Lucide React、d3-interpolate | ISC |
 
