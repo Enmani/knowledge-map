@@ -67,11 +67,6 @@ const biologyCatalog = buildCatalog([
     primaryDomain: 'biology', tags: ['生命', '系统'], level: 2, strict: ['cell-biology'],
   },
   {
-    id: 'neuroscience', title: '神经科学', englishTitle: 'Neuroscience',
-    summary: '研究神经系统如何感知、控制、学习和产生行为。',
-    primaryDomain: 'biology', tags: ['信息', '网络'], level: 3, strict: ['physiology'],
-  },
-  {
     id: 'developmental-biology', title: '发育生物学', englishTitle: 'Developmental Biology',
     summary: '研究细胞如何分化、建立空间模式并形成有组织的个体。',
     primaryDomain: 'biology', domains: ['biology', 'chemistry'], tags: ['发育', '细胞'], level: 3, strict: ['molecular-biology'],
@@ -89,7 +84,7 @@ const biologyCatalog = buildCatalog([
   {
     id: 'behavioral-biology', title: '行为生物学', englishTitle: 'Behavioral Biology',
     summary: '研究行为的神经、生理、发育、生态与进化基础。',
-    primaryDomain: 'biology', tags: ['行为', '信息', '适应'], level: 3, strict: ['neuroscience', 'evolution'],
+    primaryDomain: 'biology', domains: ['biology', 'neuroscience'], tags: ['行为', '信息', '适应'], level: 3, strict: ['evolution'], recommended: ['neuroscience'],
   },
   {
     id: 'reproductive-biology', title: '生殖生物学', englishTitle: 'Reproductive Biology',
@@ -209,12 +204,12 @@ const biologyCatalog = buildCatalog([
   {
     id: 'systems-biology', title: '系统生物学', englishTitle: 'Systems Biology',
     summary: '用网络和动力模型研究生命系统的整体行为。',
-    primaryDomain: 'biology', domains: ['biology', 'mathematics', 'physics'], tags: ['网络', '动力系统'], level: 4, importance: 1.2, strict: ['bioinformatics'], recommended: ['dynamical-systems'],
+    primaryDomain: 'biology', domains: ['biology', 'mathematics', 'physics'], tags: ['网络', '动力系统'], level: 4, importance: 1.2, recommended: ['bioinformatics', 'dynamical-systems', 'molecular-biology'],
   },
   {
     id: 'computational-biology', title: '计算生物学', englishTitle: 'Computational Biology',
     summary: '用算法、模拟和统计模型解释生物系统及多尺度数据。',
-    primaryDomain: 'biology', domains: ['biology', 'mathematics', 'computer-science'], tags: ['数据', '计算方法', '建模'], level: 4, importance: 1.15, strict: ['bioinformatics', 'statistics'],
+    primaryDomain: 'biology', domains: ['biology', 'mathematics', 'computer-science'], tags: ['数据', '计算方法', '建模'], level: 4, importance: 1.15, strict: ['statistics'], recommended: ['bioinformatics', 'algorithms', 'mathematical-modeling'],
   },
   {
     id: 'biostatistics', title: '生物统计学', englishTitle: 'Biostatistics',

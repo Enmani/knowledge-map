@@ -1,5 +1,7 @@
 export const RELATED_NODE_LODS = ['card', 'title'] as const
 export const RELATED_NODE_MIN_OPACITY = 0.88
+export const RELATED_NODE_RENDER_ORDER = 20
+export const SELECTED_NODE_STAR_SCALE = 2
 
 export type NodeDisplayPriority = 'default' | 'selected' | 'hovered'
 
@@ -17,4 +19,8 @@ export function resolveNodeDisplayPriority(
 ): NodeDisplayPriority {
   if (hovered) return 'hovered'
   return selected ? 'selected' : 'default'
+}
+
+export function relatedNodeDepthRenderOrder(cameraDepth: number): number {
+  return RELATED_NODE_RENDER_ORDER + 1 / (1 + Math.max(0, cameraDepth))
 }

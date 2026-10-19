@@ -10,6 +10,7 @@ const MATH_ID_ALIASES: Readonly<Record<string, string>> = {
 }
 
 const CROSS_DOMAIN_MEMBERSHIP: Readonly<Record<string, readonly ScienceDomainId[]>> = {
+  'vectors-coordinates': ['mathematics', 'physics', 'computer-science'],
   'vector-geometry': ['mathematics', 'physics'],
   'differential-geometry': ['mathematics', 'physics'],
   'differential-equations': ['mathematics', 'physics'],
@@ -47,6 +48,7 @@ const toKnowledgeSpaceNode = (node: MathNode): KnowledgeSpaceNode => {
   const id = toKnowledgeSpaceMathId(node.id)
   return defineNode({
     id,
+    canonicalConceptId: node.canonicalConceptId,
     title: node.title,
     englishTitle: node.english,
     summary: node.summary,
@@ -61,11 +63,21 @@ const toKnowledgeSpaceNode = (node: MathNode): KnowledgeSpaceNode => {
 export const mathematicsNodes: readonly KnowledgeSpaceNode[] = mathNodes.map(toKnowledgeSpaceNode)
 
 export const mathematicsEdges: readonly KnowledgeSpaceEdge[] = mathNodes.flatMap((node) => (
-  node.prerequisites.map((source) => defineEdge({
-    source: toKnowledgeSpaceMathId(source),
-    target: toKnowledgeSpaceMathId(node.id),
-    type: 'prerequisite',
-    prerequisiteKind: 'strict',
-    strength: 0.88,
-  }))
+  [
+    ...node.prerequisites.map((source) => defineEdge({
+      source: toKnowledgeSpaceMathId(source),
+      target: toKnowledgeSpaceMathId(node.id),
+      type: 'prerequisite',
+      prerequisiteKind: 'strict',
+      strength: 0.88,
+    })),
+    ...(node.recommendedPrerequisites ?? []).map((source) => defineEdge({
+      source: toKnowledgeSpaceMathId(source),
+      target: toKnowledgeSpaceMathId(node.id),
+      type: 'prerequisite',
+      prerequisiteKind: 'recommended',
+      strength: 0.62,
+      label: '建议前置',
+    })),
+  ]
 ))

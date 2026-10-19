@@ -2,6 +2,7 @@ import { frontierCatalog } from './catalog'
 import {
   deduplicateFrontierEntries,
   getFrontierEntriesDueForReview,
+  getLatestBreakthroughEntries,
   getFrontierSourcesForEntry,
   isDefaultFrontierEntry,
   queryFrontierEntries,
@@ -24,6 +25,31 @@ expect(openProblems.length === 10, '开放问题查询应返回各学科的十�
 expect(
   openProblems.some((entry) => entry.tags.includes('希尔伯特问题')),
   '开放问题中应保留关联希尔伯特问题的黎曼猜想。',
+)
+
+const latestBreakthroughs = getLatestBreakthroughEntries(frontierCatalog.entries)
+expect(latestBreakthroughs.length === 14, '最新进展应返回十四条研究路线的最近已解决突破。')
+expect(
+  latestBreakthroughs.some((entry) => entry.id === 'kakeya-r3-streamlined-proof-2026'),
+  '三维挂谷路线应把 2026 年简化证明标记为最新进展。',
+)
+expect(
+  !latestBreakthroughs.some((entry) => entry.id === 'kakeya-r3-proof-2025'),
+  '同一路线出现更新突破后，旧的三维挂谷证明不应继续标记为最新进展。',
+)
+expect(
+  latestBreakthroughs.some((entry) => entry.id === 'complete-human-y-chromosome-2023') &&
+    !latestBreakthroughs.some((entry) => entry.id === 't2t-human-genome-2022'),
+  '完整人类参考基因组路线应由 2023 年完整 Y 染色体接替 2022 年 T2T-CHM13。',
+)
+expect(
+  latestBreakthroughs.some((entry) => entry.id === 'sgr-a-black-hole-image-2022') &&
+    !latestBreakthroughs.some((entry) => entry.id === 'm87-black-hole-image-2019'),
+  '黑洞成像路线应由 2022 年 Sgr A* 成像接替 2019 年 M87* 首图。',
+)
+expect(
+  new Set(latestBreakthroughs.map((entry) => entry.discipline)).size === 5,
+  '最新进展应覆盖数学、物理、化学、生物和交叉学科。',
 )
 expect(
   queryFrontierEntries(frontierCatalog, { disciplines: ['physics'], kinds: ['open-problem'] })

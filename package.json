@@ -2,7 +2,7 @@
   "name": "knowledge-map",
   "private": true,
   "version": "0.1.0",
-  "description": "连接数学、物理、化学、生物、计算机科学、地球与环境科学的二维知识地图与三维公共知识空间。",
+  "description": "连接数学、物理、化学、生物、神经科学、认知科学、计算机科学、地球与环境科学的二维知识地图与三维公共知识空间。",
   "license": "Apache-2.0",
   "author": "Enmani",
   "repository": {
@@ -23,6 +23,8 @@
     "physics",
     "chemistry",
     "biology",
+    "neuroscience",
+    "cognitive-science",
     "computer-science",
     "earth-science",
     "environmental-science"
@@ -35,7 +37,7 @@
     "dev": "vite",
     "restart:quick": "node scripts/restart-quick.mjs",
     "build": "tsc -b && vite build",
-    "test:smoke": "node src/engine/smoke-test.mjs && node src/frontier/smoke-test.mjs && node src/knowledge/space3d/smoke-test.mjs",
+    "test:smoke": "node src/engine/smoke-test.mjs && node src/content/smoke-test.mjs && node src/frontier/smoke-test.mjs && node src/knowledge/space3d/smoke-test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

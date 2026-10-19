@@ -97,6 +97,9 @@ export function validateFrontierEntry(entry: FrontierEntry): FrontierValidationR
       ['条目去重键', entry.dedupeKey],
       ['条目标题', entry.title],
       ['条目摘要', entry.summary],
+      ...(entry.breakthroughTrack === undefined
+        ? []
+        : [['突破路线', entry.breakthroughTrack] as const]),
     ],
     { entryId: entry.id },
   )
@@ -160,6 +163,15 @@ export function validateFrontierEntry(entry: FrontierEntry): FrontierValidationR
       code: 'award-metadata-required',
       severity: 'error',
       message: `奖项条目“${entry.id}”缺少奖项类型。`,
+      entryId: entry.id,
+    })
+  }
+
+  if (entry.breakthroughTrack?.trim() && entry.kind !== 'historical-milestone') {
+    issues.push({
+      code: 'invalid-breakthrough-track-kind',
+      severity: 'error',
+      message: `条目“${entry.id}”只有历史已解决问题可以声明突破路线。`,
       entryId: entry.id,
     })
   }

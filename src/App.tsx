@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ChevronUp,
   ChevronRight,
   CircleHelp,
   Compass,
@@ -21,7 +22,11 @@ import {
 } from 'lucide-react'
 import { interpolateZoom, type ZoomView } from 'd3-interpolate'
 import { lazy, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { frontierStatusLabels, getKnowledgeContentForConcept } from './content'
+import {
+  frontierStatusLabels,
+  getKnowledgeContentForConcept,
+  KnowledgeArticle,
+} from './content'
 import {
   frontierCatalog,
   isDefaultFrontierEntry,
@@ -31,7 +36,6 @@ import {
   domainById,
   domains,
   levelNames,
-  tagFields,
   type DomainId,
   type FieldTagId,
   type MathNode,
@@ -48,6 +52,7 @@ import {
   setProgressMode,
   type ProgressStoreState,
 } from './engine/progression/progressStore'
+import { resolveCanonicalConceptId } from './domain/conceptIdentity'
 import { getFogVisibility } from './engine/progression/fogVisibility'
 import { evaluateConceptUnlock, getRequiredPrerequisiteIds } from './engine/progression/unlock'
 import {
@@ -82,17 +87,21 @@ import type { PixiHitTestResult, PixiVisualState } from './renderers/pixi'
 import { WidgetRenderer } from './widgets'
 import {
   getKnowledgeLens,
+  domainFilterStrengths,
   knowledgeLenses,
   knowledgeSpaceEdges,
   knowledgeSpaceNodes,
   projectKnowledgeSpace,
   scienceDomains,
   type KnowledgeLensId,
+  type DomainFilterStrength,
   type KnowledgeRelationType,
+  type KnowledgeSpaceEdge,
   type ScienceDomainId,
 } from './knowledge/space3d'
 import type { ThreeKnowledgeSurfaceHandle } from './features/space3d'
-import { calculusThreeSubspace } from './features/space3d/calculusSubspace'
+import { threeKnowledgeSubspaces } from './features/space3d/subspaceRegistry'
+import { KnowledgeSpaceDetailPanel } from './features/space3d/KnowledgeSpaceDetailPanel'
 import type { SpaceColorTheme } from './renderers/three'
 import {
   completeWheelZoom,
@@ -107,7 +116,7 @@ import {
 
 type Transform = { x: number; y: number; scale: number }
 type MapViewMode = 'atlas2d' | 'space3d'
-type SpaceDomainFilterMode = 'temporary' | 'focus'
+type SpaceControlMenu = 'lens' | 'domain' | null
 type LearningStatus = 'mastered' | 'available' | 'locked'
 type SceneSelectionContext = {
   upstream: ReadonlySet<string>
@@ -138,7 +147,6 @@ const ThreeKnowledgeSurface = lazy(() => import('./features/space3d').then((modu
 const scienceDomainById = Object.fromEntries(
   scienceDomains.map((domain) => [domain.id, domain]),
 )
-const threeKnowledgeSubspaces = [calculusThreeSubspace] as const
 const threeSubspaceNodes = threeKnowledgeSubspaces.flatMap((subspace) => (
   subspace.nodes.map(({ node }) => node)
 ))
@@ -177,6 +185,13 @@ const relationTypeLabels: Readonly<Record<KnowledgeRelationType, string>> = {
   historical: '历史',
   'shared-model': '共享模型',
 }
+
+const relationDisplayLabel = (edge: KnowledgeSpaceEdge) => (
+  edge.label
+  ?? (edge.type === 'prerequisite' && edge.prerequisiteKind === 'recommended'
+    ? '建议前置'
+    : relationTypeLabels[edge.type])
+)
 
 function getInitialProgress(): ProgressStoreState {
   return loadProgressFromStorage(window.localStorage, knownConceptIds, {
@@ -289,6 +304,7 @@ function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   const frontierTriggerRef = useRef<HTMLButtonElement>(null)
   const frontierOpenerRef = useRef<HTMLElement | null>(null)
+  const spaceControlsRef = useRef<HTMLDivElement>(null)
   const zoomValueRef = useRef<HTMLSpanElement>(null)
   const spaceZoomValueRef = useRef<HTMLSpanElement>(null)
   const lastZoomPercentRef = useRef<number | null>(null)
@@ -308,7 +324,8 @@ function App() {
   const [mapViewMode, setMapViewMode] = useState<MapViewMode>('atlas2d')
   const [activeLensId, setActiveLensId] = useState<KnowledgeLensId>('world')
   const [spaceDomainFilter, setSpaceDomainFilter] = useState<ScienceDomainId | null>(null)
-  const [spaceDomainFilterMode, setSpaceDomainFilterMode] = useState<SpaceDomainFilterMode>('temporary')
+  const [spaceDomainFilterStrength, setSpaceDomainFilterStrength] = useState<DomainFilterStrength>('inclusive')
+  const [spaceControlMenu, setSpaceControlMenu] = useState<SpaceControlMenu>(null)
   const [spaceWalkingMode, setSpaceWalkingMode] = useState(false)
   const [spaceFieldsVisible, setSpaceFieldsVisible] = useState(true)
   const [activeSpaceSubspaceId, setActiveSpaceSubspaceId] = useState<string | null>(null)
@@ -327,7 +344,7 @@ function App() {
   const [transform, setTransform] = useState<Transform>(() => {
     const initialTransform = cameraForNode(activeScene, activeScene.initialNodeId, {
       width: window.innerWidth,
-      height: window.innerHeight + 66,
+      height: window.innerHeight,
     }, 0.72)
     transformRef.current = initialTransform
     return initialTransform
@@ -361,12 +378,15 @@ function App() {
   const selectedSpaceDomain = selectedSpaceNode ? scienceDomainById[selectedSpaceNode.primaryDomain] : null
   const activeLens = getKnowledgeLens(activeLensId)
   const activeSpaceFilterDomain = spaceDomainFilter ? scienceDomainById[spaceDomainFilter] : null
+  const spaceFilterStrengthIndex = domainFilterStrengths.findIndex(({ value }) => value === spaceDomainFilterStrength)
+  const activeSpaceFilterStrength = domainFilterStrengths[spaceFilterStrengthIndex]
   const spaceProjection = useMemo(() => mapViewMode === 'space3d'
     ? projectKnowledgeSpace(activeLensId, {
         domainFilter: spaceDomainFilter,
-        filterMode: spaceDomainFilter ? spaceDomainFilterMode : 'none',
+        domainFilterStrength: spaceDomainFilterStrength,
+        filterMode: spaceDomainFilter ? 'temporary' : 'none',
       })
-    : null, [activeLensId, mapViewMode, spaceDomainFilter, spaceDomainFilterMode])
+    : null, [activeLensId, mapViewMode, spaceDomainFilter, spaceDomainFilterStrength])
   const selectedSpaceProjection = selectedSpaceNodeId && !activeSpaceSubspace
     ? spaceProjection?.nodes.find((projected) => projected.node.id === selectedSpaceNodeId) ?? null
     : null
@@ -391,11 +411,14 @@ function App() {
   const selectedVisibility = selectedNode ? getFogVisibility(knowledgeAtlas, progressStore, selectedNode.id) : null
   const selectedContent = selectedNode ? getKnowledgeContentForConcept(selectedNode.id) : undefined
   const selectedFrontierCount = selectedNode ? frontierEntryCountsByConcept[selectedNode.id] ?? 0 : 0
-  const selectedSpaceFrontierConceptId = selectedSpaceNode
+  const selectedSpaceConceptId = selectedSpaceNode
     ? SPACE_TO_MATH_CONCEPT_ID[selectedSpaceNode.id] ?? selectedSpaceNode.id
     : null
-  const selectedSpaceFrontierCount = selectedSpaceFrontierConceptId
-    ? frontierEntryCountsByConcept[selectedSpaceFrontierConceptId] ?? 0
+  const selectedSpaceContent = selectedSpaceConceptId
+    ? getKnowledgeContentForConcept(selectedSpaceConceptId)
+    : undefined
+  const selectedSpaceFrontierCount = selectedSpaceConceptId
+    ? frontierEntryCountsByConcept[selectedSpaceConceptId] ?? 0
     : 0
   const mastered = useMemo(() => new Set(
     [...progressStore.byConcept.values()]
@@ -407,7 +430,7 @@ function App() {
     [selectedId],
   )
   const selectedMissingPrerequisiteIds = useMemo(
-    () => selectedPrerequisiteIds.filter((id) => !mastered.has(id)),
+    () => selectedPrerequisiteIds.filter((id) => !mastered.has(resolveCanonicalConceptId(id))),
     [mastered, selectedPrerequisiteIds],
   )
   const directUnlocks = useMemo(
@@ -461,6 +484,17 @@ function App() {
       setSelectedSpaceNodeId(null)
     }
   }, [selectedSpaceNodeId, visibleSpaceNodeIds])
+
+  useEffect(() => {
+    if (!spaceControlMenu) return undefined
+    const closeMenuOutside = (event: PointerEvent) => {
+      if (!spaceControlsRef.current?.contains(event.target as Node)) {
+        setSpaceControlMenu(null)
+      }
+    }
+    window.addEventListener('pointerdown', closeMenuOutside)
+    return () => window.removeEventListener('pointerdown', closeMenuOutside)
+  }, [spaceControlMenu])
 
   const activeSceneSelectionContext = useMemo(
     () => buildSceneSelectionContext(activeScene, selectedId),
@@ -689,7 +723,7 @@ function App() {
     const next = {
       scale,
       x: 36 + (usableWidth - bounds.width * scale) / 2 - bounds.x * scale,
-      y: 66 + (viewport.height - 66 - bounds.height * scale) / 2 - bounds.y * scale,
+      y: (viewport.height - bounds.height * scale) / 2 - bounds.y * scale,
     }
     cancelCameraAnimation()
     paintCamera(next, true)
@@ -758,6 +792,7 @@ function App() {
     setSearchOpen(false)
     setQuery('')
     setShowLegend(false)
+    setSpaceControlMenu(null)
     if (activeSpaceSubspaceId) setSelectedSpaceNodeId(null)
     setActiveSpaceSubspaceId(null)
     setMapViewMode(nextMode)
@@ -959,6 +994,11 @@ function App() {
         closeFrontierRadar()
         return
       }
+      if (event.key === 'Escape' && spaceControlMenu) {
+        event.preventDefault()
+        setSpaceControlMenu(null)
+        return
+      }
       if ((event.target as HTMLElement).tagName === 'INPUT') {
         if (event.key === 'Escape') {
           searchRef.current?.blur()
@@ -989,7 +1029,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [closeDetails, closeFrontierRadar, closeSpaceDetails, exitScope, fitMap, frontierOpen, mapViewMode, navigation.canExit, zoomAt])
+  }, [closeDetails, closeFrontierRadar, closeSpaceDetails, exitScope, fitMap, frontierOpen, mapViewMode, navigation.canExit, spaceControlMenu, zoomAt])
 
   const schedulePan = () => {
     if (panFrameRef.current !== null) return
@@ -1363,84 +1403,6 @@ function App() {
         </button>
       </aside>}
 
-      {mapViewMode === 'space3d' && (
-        <nav className="knowledge-lens-rail" aria-label="公共知识透镜">
-          <div className="lens-rail-heading">
-            <span>观察视角</span>
-            <small>PUBLIC LENS</small>
-          </div>
-          {knowledgeLenses.map((lens) => {
-            const focusedDomain = lens.focusDomains.length === 1 ? scienceDomainById[lens.focusDomains[0]] : null
-            return (
-              <button
-                key={lens.id}
-                className={activeLensId === lens.id ? 'active' : ''}
-                style={{ '--lens-color': focusedDomain?.color ?? '#7a5d49' } as React.CSSProperties}
-                aria-label={`${lens.label}：${lens.description}`}
-                aria-pressed={activeLensId === lens.id}
-                onClick={() => setActiveLensId(lens.id)}
-                title={lens.description}
-              >
-                <span className="lens-symbol">{focusedDomain?.shortLabel ?? (lens.id === 'bridges' ? '↔' : '◎')}</span>
-                <span><strong>{lens.label}</strong><small>{lens.description}</small></span>
-              </button>
-            )
-          })}
-          <div className="lens-instructions">
-            <span>左拖平移</span><span>指针定点缩放</span><span>Alt / 右拖范围中心旋转</span><span>行走：WASD / Q / E</span>
-          </div>
-          <span className="sr-only" aria-live="polite">已切换到{activeLens.label}</span>
-        </nav>
-      )}
-
-      {mapViewMode === 'space3d' && (
-        <aside className="space-filter-panel" aria-label="三维领域筛选与专业聚焦">
-          <div className="space-filter-heading">
-            <span><Filter size={13} /> 领域范围</span>
-            <small>{activeSpaceFilterDomain?.label ?? '全部领域'}</small>
-          </div>
-          <div className="space-filter-modes" role="group" aria-label="筛选布局方式">
-            <button
-              className={spaceDomainFilterMode === 'temporary' ? 'active' : ''}
-              aria-pressed={spaceDomainFilterMode === 'temporary'}
-              onClick={() => setSpaceDomainFilterMode('temporary')}
-            >临时筛选</button>
-            <button
-              className={spaceDomainFilterMode === 'focus' ? 'active' : ''}
-              aria-pressed={spaceDomainFilterMode === 'focus'}
-              onClick={() => setSpaceDomainFilterMode('focus')}
-            >专业聚焦</button>
-          </div>
-          <div className="space-filter-domains" role="group" aria-label="筛选领域">
-            <button
-              className={spaceDomainFilter === null ? 'active' : ''}
-              aria-pressed={spaceDomainFilter === null}
-              onClick={() => selectSpaceDomainFilter(null)}
-            >全部</button>
-            {scienceDomains.map((domain) => (
-              <button
-                key={domain.id}
-                className={spaceDomainFilter === domain.id ? 'active' : ''}
-                style={{ '--filter-color': domain.color } as React.CSSProperties}
-                aria-label={`只看${domain.label}`}
-                aria-pressed={spaceDomainFilter === domain.id}
-                onClick={() => selectSpaceDomainFilter(domain.id)}
-              ><span className="filter-domain-short">{domain.shortLabel}</span><span className="filter-domain-label">{domain.label}</span></button>
-            ))}
-          </div>
-          <p className="space-filter-explanation">
-            {!activeSpaceFilterDomain
-              ? '完整知识空间保留关系驱动的公共基准排列。'
-              : spaceDomainFilterMode === 'temporary'
-                ? `仅显示${activeSpaceFilterDomain.label}相关知识，节点保持公共坐标。`
-                : `${activeSpaceFilterDomain.label}节点重新利用可见空间，基础—专业化半径保持稳定。`}
-          </p>
-          <span className="sr-only" aria-live="polite">
-            {activeSpaceFilterDomain ? `已${spaceDomainFilterMode === 'focus' ? '聚焦' : '筛选'}${activeSpaceFilterDomain.label}` : '已显示全部领域'}
-          </span>
-        </aside>
-      )}
-
       <div
         className={`canvas ${mapViewMode === 'space3d' ? 'canvas--space3d' : ''}`}
         style={{ userSelect: 'none' }}
@@ -1524,7 +1486,7 @@ function App() {
       </div>}
 
       {mapViewMode === 'space3d' && (
-        <div className="space-camera-controls" aria-label="三维相机状态">
+        <div ref={spaceControlsRef} className="space-camera-controls" aria-label="三维相机与筛选控制">
           <span ref={spaceZoomValueRef}>100%</span>
           {activeSpaceSubspace && (
             <>
@@ -1534,7 +1496,7 @@ function App() {
           )}
           <i />
           <button onClick={() => threeSurfaceRef.current?.resetCamera()} title="重置三维视角">
-            <Focus size={17} /> 重置视角
+            <Focus size={17} /> <span className="space-control-label">重置视角</span>
           </button>
           <i />
           <button
@@ -1543,7 +1505,7 @@ function App() {
             onClick={() => setSpaceWalkingMode((enabled) => !enabled)}
             title="开启后使用 WASD 行走，Q 上升，E 下降"
           >
-            <Compass size={16} /> 行走模式
+            <Compass size={16} /> <span className="space-control-label">行走模式</span>
           </button>
           <button
             className={spaceFieldsVisible ? 'active' : ''}
@@ -1551,7 +1513,7 @@ function App() {
             onClick={() => setSpaceFieldsVisible((visible) => !visible)}
             title="显示或隐藏颜色场域"
           >
-            <Sparkles size={16} /> 颜色场域
+            <Sparkles size={16} /> <span className="space-control-label">颜色场域</span>
           </button>
           <i />
           <button
@@ -1565,6 +1527,133 @@ function App() {
               {spaceColorTheme === 'dark' ? '浅色界面' : '深色界面'}
             </span>
           </button>
+          <i />
+          <div className="space-control-menu">
+            <button
+              type="button"
+              className={`space-control-menu__trigger ${spaceControlMenu === 'lens' ? 'active' : ''}`}
+              aria-expanded={spaceControlMenu === 'lens'}
+              aria-controls="space-lens-menu"
+              onClick={() => setSpaceControlMenu((current) => current === 'lens' ? null : 'lens')}
+              title={`当前观察视角：${activeLens.label}`}
+            >
+              <MapIcon size={16} />
+              <span className="space-control-menu__label">{activeLens.label}</span>
+              <span className="space-control-menu__compact-label">视角</span>
+              <ChevronUp className="space-control-menu__chevron" size={13} />
+            </button>
+            {spaceControlMenu === 'lens' && (
+              <nav id="space-lens-menu" className="space-control-popover space-control-popover--lens" aria-label="公共知识观察视角">
+                <div className="space-control-popover__heading">
+                  <span>观察视角</span>
+                  <small>PUBLIC LENS</small>
+                </div>
+                <div className="space-control-options space-control-options--lens" role="menu">
+                  {knowledgeLenses.map((lens) => {
+                    const focusedDomain = lens.focusDomains.length === 1 ? scienceDomainById[lens.focusDomains[0]] : null
+                    return (
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        key={lens.id}
+                        className={activeLensId === lens.id ? 'active' : ''}
+                        style={{ '--lens-color': focusedDomain?.color ?? '#7a5d49' } as React.CSSProperties}
+                        aria-checked={activeLensId === lens.id}
+                        onClick={() => {
+                          setActiveLensId(lens.id)
+                          setSpaceControlMenu(null)
+                        }}
+                        title={lens.description}
+                      >
+                        <span className="lens-symbol">{focusedDomain?.shortLabel ?? (lens.id === 'bridges' ? '↔' : '◎')}</span>
+                        <span><strong>{lens.label}</strong><small>{lens.description}</small></span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </nav>
+            )}
+          </div>
+          <div className="space-control-menu">
+            <button
+              type="button"
+              className={`space-control-menu__trigger ${spaceControlMenu === 'domain' ? 'active' : ''} ${spaceDomainFilter ? 'is-filtered' : ''}`}
+              aria-expanded={spaceControlMenu === 'domain'}
+              aria-controls="space-domain-menu"
+              onClick={() => setSpaceControlMenu((current) => current === 'domain' ? null : 'domain')}
+              title={`当前领域范围：${activeSpaceFilterDomain?.label ?? '全部领域'}`}
+            >
+              <Filter size={16} />
+              <span className="space-control-menu__label">{activeSpaceFilterDomain?.label ?? '全部领域'}</span>
+              <span className="space-control-menu__compact-label">领域</span>
+              <ChevronUp className="space-control-menu__chevron" size={13} />
+            </button>
+            {spaceControlMenu === 'domain' && (
+              <aside id="space-domain-menu" className="space-control-popover space-control-popover--domain" aria-label="三维领域范围">
+                <div className="space-control-popover__heading">
+                  <span>领域范围</span>
+                  <small>{activeSpaceFilterDomain?.label ?? '全部领域'}</small>
+                </div>
+                <div className="space-control-options space-control-options--domains" role="menu">
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    className={spaceDomainFilter === null ? 'active' : ''}
+                    aria-checked={spaceDomainFilter === null}
+                    onClick={() => selectSpaceDomainFilter(null)}
+                  >
+                    <span className="filter-domain-symbol">◎</span>
+                    <strong>全部领域</strong>
+                  </button>
+                  {scienceDomains.map((domain) => (
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      key={domain.id}
+                      className={spaceDomainFilter === domain.id ? 'active' : ''}
+                      style={{ '--filter-color': domain.color } as React.CSSProperties}
+                      aria-checked={spaceDomainFilter === domain.id}
+                      onClick={() => selectSpaceDomainFilter(domain.id)}
+                    >
+                      <span className="filter-domain-symbol">{domain.shortLabel}</span>
+                      <strong>{domain.label}</strong>
+                    </button>
+                  ))}
+                </div>
+                <div className={`space-filter-strength ${spaceDomainFilter ? '' : 'is-disabled'}`}>
+                  <div className="space-filter-strength__heading">
+                    <label htmlFor="space-filter-strength">筛选强度</label>
+                    <span>{spaceDomainFilter ? `${spaceProjection?.nodes.filter((node) => node.visible).length ?? 0} 个节点` : '请先选择领域'}</span>
+                  </div>
+                  <input
+                    id="space-filter-strength"
+                    type="range"
+                    min={0}
+                    max={domainFilterStrengths.length - 1}
+                    step={1}
+                    value={spaceFilterStrengthIndex}
+                    disabled={!spaceDomainFilter}
+                    aria-valuetext={activeSpaceFilterStrength.label}
+                    aria-describedby="space-filter-strength-description"
+                    onChange={(event) => setSpaceDomainFilterStrength(domainFilterStrengths[Number(event.target.value)].value)}
+                  />
+                  <div className="space-filter-strength__labels" aria-hidden="true">
+                    {domainFilterStrengths.map(({ value, label }) => (
+                      <span key={value} className={value === spaceDomainFilterStrength ? 'active' : ''}>{label}</span>
+                    ))}
+                  </div>
+                </div>
+                <p id="space-filter-strength-description" className="space-control-popover__note">
+                  {activeSpaceFilterDomain
+                    ? `${activeSpaceFilterStrength.description}节点保持公共坐标。`
+                    : '显示完整公共知识空间。'}
+                </p>
+              </aside>
+            )}
+          </div>
+          <span className="sr-only" aria-live="polite">
+            已切换到{activeLens.label}；{activeSpaceFilterDomain ? `已筛选${activeSpaceFilterDomain.label}，${activeSpaceFilterStrength.label}` : '已显示全部领域'}
+          </span>
         </div>
       )}
 
@@ -1587,7 +1676,6 @@ function App() {
           onWidthChange={setWorkbenchWidth}
         >
           <aside className="detail-panel" style={{ '--panel-color': domainById[selectedNode.domain].color } as React.CSSProperties}>
-          <div className="panel-ruler" />
           <button className="panel-close" onClick={closeDetails} aria-label="关闭详情"><X size={19} /></button>
           <div className="panel-domain">
             <span>{domainById[selectedNode.domain].symbol}</span>
@@ -1610,26 +1698,10 @@ function App() {
           )}
 
           {selectedContent && (
-            <section className="knowledge-story" aria-label="知识故事与内容来源">
-              <div className="knowledge-story__heading">
-                <span>知识故事</span>
-                <small>{frontierStatusLabels[selectedContent.frontierStatus]}</small>
-              </div>
-              <p>{selectedContent.summary}</p>
-              {selectedContent.storyParagraphs.map((paragraph) => <p key={paragraph.id}>{paragraph.text}</p>)}
-              <details>
-                <summary>内容来源与复核日期</summary>
-                <ul>
-                  {selectedContent.sources.map((source) => (
-                    <li key={source.id}>
-                      {source.url ? <a href={source.url} target="_blank" rel="noreferrer">{source.title}</a> : <span>{source.title}</span>}
-                      <small>{source.creators.join('、')}{source.publishedYear ? ` · ${source.publishedYear}` : ''}{source.locator ? ` · ${source.locator}` : ''}</small>
-                    </li>
-                  ))}
-                </ul>
-                <p>最近复核 {selectedContent.reviewedAt} · 下次复核 {selectedContent.reviewDue}</p>
-              </details>
-            </section>
+            <KnowledgeArticle
+              content={selectedContent}
+              statusLabel={frontierStatusLabels[selectedContent.frontierStatus]}
+            />
           )}
 
           {selectedFrontierCount > 0 && (
@@ -1645,7 +1717,7 @@ function App() {
               <button
                 key={tag}
                 className={activeTag === tag ? 'active' : ''}
-                style={{ '--tag-color': fieldColor(tag, tagFields) } as React.CSSProperties}
+                style={{ '--tag-color': fieldColor(tag, activeScene.fieldDefinitions) } as React.CSSProperties}
                 onClick={() => setActiveTag((current) => current === tag ? null : tag)}
                 title={`突出 #${tag} 场域`}
               >#{tag}</button>
@@ -1737,27 +1809,50 @@ function App() {
           dark={spaceColorTheme === 'dark'}
           onWidthChange={setWorkbenchWidth}
         >
-          <aside
-            className="detail-panel knowledge-space-detail"
-            style={{ '--panel-color': selectedSpaceDomain.color } as React.CSSProperties}
+          <KnowledgeSpaceDetailPanel
+            node={selectedSpaceNode}
+            domain={selectedSpaceDomain}
+            relatedDomains={selectedSpaceNode.domains.map((domainId) => scienceDomainById[domainId])}
+            levelLabel={levelNames[selectedSpaceNode.level]}
+            onClose={closeSpaceDetails}
           >
-          <div className="panel-ruler" />
-          <button className="panel-close" onClick={closeSpaceDetails} aria-label="关闭详情"><X size={19} /></button>
-          <div className="panel-domain">
-            <span>{selectedSpaceDomain.shortLabel}</span>
-            {selectedSpaceDomain.label} · {levelNames[selectedSpaceNode.level]}
-          </div>
-          <h1>{selectedSpaceNode.title}</h1>
-          <p className="english-name">{selectedSpaceNode.englishTitle}</p>
-          <p className="node-summary">{selectedSpaceNode.summary}</p>
 
-          <div className="space-perspective-note">
+          {selectedSpaceContent && (
+            <KnowledgeArticle content={selectedSpaceContent} />
+          )}
+
+          {selectedSpaceContent?.widgetIds.map((widgetId) => (
+            <section className="panel-section widget-section" key={widgetId}>
+              <div className="section-heading">
+                <span><Sparkles size={14} /> 互动讲解</span>
+                <small>{completedWidgets.has(`${selectedSpaceContent.conceptId}:${widgetId}`) ? '完成' : '进行中'}</small>
+              </div>
+              <WidgetRenderer
+                widgetId={widgetId}
+                conceptId={selectedSpaceContent.conceptId}
+                onComplete={(event) => {
+                  setCompletedWidgets((current) => new Set(current).add(`${event.conceptId}:${event.widgetId}`))
+                  setProgressStore((current) => completeInteraction(current, event.conceptId, event.widgetId, event.completedAt))
+                }}
+              />
+            </section>
+          ))}
+
+          {selectedSpaceConceptId && selectedSpaceFrontierCount > 0 && (
+            <button className="frontier-context-link" onClick={() => openFrontierRadar(selectedSpaceConceptId)}>
+              <Radar size={18} />
+              <span><small>前沿动态</small><strong>{selectedSpaceFrontierCount} 条研究记录与这个知识点相连</strong></span>
+              <ChevronRight size={15} />
+            </button>
+          )}
+
+          <div className="space-perspective-note space-perspective-note--footer">
             <Sparkles size={17} />
             <div>
               <small>{activeSpaceSubspace ? '当前三维子域' : '当前公共视角'}</small>
               <strong>{activeSpaceSubspace?.title ?? activeLens.label}</strong>
               <p>{activeSpaceSubspace
-                ? '内部节点随父节点的屏幕投影尺寸连续显现，空间位置锚定在微积分节点附近。'
+                ? `内部节点随父节点的屏幕投影尺寸连续显现，空间位置锚定在${activeSpaceSubspace.title}父节点附近。`
                 : activeLens.description}</p>
               {selectedSpaceProjection && (
                 <p>前置深度 {selectedSpaceProjection.knowledgeDepth} · 基础—专业化半径 {selectedSpaceProjection.radius.toFixed(1)}</p>
@@ -1765,25 +1860,9 @@ function App() {
             </div>
           </div>
 
-          {selectedSpaceFrontierConceptId && selectedSpaceFrontierCount > 0 && (
-            <button className="frontier-context-link" onClick={() => openFrontierRadar(selectedSpaceFrontierConceptId)}>
-              <Radar size={18} />
-              <span><small>前沿动态</small><strong>{selectedSpaceFrontierCount} 条研究记录与这个知识点相连</strong></span>
-              <ChevronRight size={15} />
-            </button>
-          )}
-
-          <div className="tag-cloud" aria-label="知识标签">
-            {selectedSpaceNode.domains.map((domainId) => {
-              const domain = scienceDomainById[domainId]
-              return <span key={domainId} style={{ '--tag-color': domain.color } as React.CSSProperties}>{domain.label}</span>
-            })}
-            {selectedSpaceNode.tags.map((tag) => <span key={tag}>#{tag}</span>)}
-          </div>
-
-          <section className="panel-section">
+          <section className="panel-section space-relations-section">
             <div className="section-heading">
-              <span><ArrowRight size={14} /> {activeSpaceSubspace ? '子域前置关系' : '公共知识关系'}</span>
+              <span><ArrowRight size={14} /> {activeSpaceSubspace ? '子域知识关系' : '公共知识关系'}</span>
               <small>{selectedSpaceRelations.length}</small>
             </div>
             <div className="space-relation-list">
@@ -1795,7 +1874,7 @@ function App() {
                 return (
                   <button key={edge.id} onClick={() => selectSpaceNode(related.id)}>
                     <span className="space-relation-direction">{outgoing ? '→' : '←'}</span>
-                    <span><strong>{related.title}</strong><small>{edge.label ?? relationTypeLabels[edge.type]} · {relatedDomain.label}</small></span>
+                    <span><strong>{related.title}</strong><small>{relationDisplayLabel(edge)} · {relatedDomain.label}</small></span>
                     <ChevronRight size={15} />
                   </button>
                 )
@@ -1806,10 +1885,10 @@ function App() {
           <div className="space-public-note">
             <strong>{activeSpaceSubspace ? '子域知识记录' : '公共知识记录'}</strong>
             <p>{activeSpaceSubspace
-              ? '微积分内部节点沿前置关系排列。缩小镜头后，子域逐渐收起并恢复公共知识空间。'
+              ? `${activeSpaceSubspace.title}内部节点以严格与建议前置、共享模型、类比和应用关系组织。缩小镜头后，子域逐渐收起并恢复公共知识空间。`
               : '此位置来自关系驱动的公共投影。切换视角会改变相机与视觉强调，公共坐标、知识点身份和关系数据保持一致。'}</p>
           </div>
-          </aside>
+          </KnowledgeSpaceDetailPanel>
         </SideWorkbench>
       )}
 

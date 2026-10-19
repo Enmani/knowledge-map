@@ -11,11 +11,16 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   frontierCatalog,
   getFrontierSourcesForEntry,
+  getLatestBreakthroughEntries,
   isDefaultFrontierEntry,
   isPublicFrontierEntry,
   prepareFrontierEntries,
   type FrontierDiscipline,
+  type FrontierEntryKind,
 } from '../../frontier'
+
+const latestBreakthroughKind = 'latest-breakthrough' as const
+type RadarKind = 'all' | FrontierEntryKind | typeof latestBreakthroughKind
 
 type FrontierRadarProps = {
   open: boolean
@@ -33,6 +38,7 @@ const kindLabels: Readonly<Record<string, string>> = {
   'research-update': '研究进展',
   'open-problem': '开放问题',
   'historical-milestone': '历史已解决问题',
+  [latestBreakthroughKind]: '最新进展',
   'award-overview': '奖项观察',
   'award-research': '获奖研究',
 }
@@ -41,6 +47,7 @@ const kindColors: Readonly<Record<string, string>> = {
   'research-update': '#a64032',
   'open-problem': '#4d598a',
   'historical-milestone': '#8b6742',
+  [latestBreakthroughKind]: '#a86324',
   'award-overview': '#9a6b24',
   'award-research': '#9a6b24',
 }
@@ -81,7 +88,7 @@ function formatFrontierDate(date: string): string {
 }
 
 function tagLabel(tag: string): string {
-  return tag === '菲尔兹奖' ? `🏅 ${tag}` : tag
+  return tag === '菲尔兹奖' || tag === '诺贝尔奖' ? `🏅 ${tag}` : tag
 }
 
 export function FrontierRadar({
@@ -95,7 +102,7 @@ export function FrontierRadar({
   onLocateConcept,
   onVisibleConceptIdsChange,
 }: FrontierRadarProps) {
-  const [activeKind, setActiveKind] = useState<string>('all')
+  const [activeKind, setActiveKind] = useState<RadarKind>('all')
   const [activeDiscipline, setActiveDiscipline] = useState<FrontierDiscipline | 'all'>('all')
   const [activeTag, setActiveTag] = useState<string | null>(null)
 
@@ -116,15 +123,29 @@ export function FrontierRadar({
       : publicEntries,
     [focusConceptId, publicEntries],
   )
+  const latestBreakthroughEntries = useMemo(
+    () => getLatestBreakthroughEntries(publicEntries),
+    [publicEntries],
+  )
+  const latestBreakthroughIds = useMemo(
+    () => new Set(latestBreakthroughEntries.map((entry) => entry.id)),
+    [latestBreakthroughEntries],
+  )
+  const scopedLatestBreakthroughEntries = useMemo(
+    () => scopedEntries.filter((entry) => latestBreakthroughIds.has(entry.id)),
+    [latestBreakthroughIds, scopedEntries],
+  )
   const availableKinds = useMemo(
     () => [...new Set(scopedEntries.map((entry) => entry.kind))],
     [scopedEntries],
   )
   const kindEntries = useMemo(
-    () => scopedEntries.filter((entry) => (
-      activeKind === 'all' ? isDefaultFrontierEntry(entry) : entry.kind === activeKind
-    )),
-    [activeKind, scopedEntries],
+    () => activeKind === latestBreakthroughKind
+      ? scopedLatestBreakthroughEntries
+      : scopedEntries.filter((entry) => (
+        activeKind === 'all' ? isDefaultFrontierEntry(entry) : entry.kind === activeKind
+      )),
+    [activeKind, scopedEntries, scopedLatestBreakthroughEntries],
   )
   const availableDisciplines = useMemo(() => {
     const counts = new Map<FrontierDiscipline, number>()
@@ -185,9 +206,9 @@ export function FrontierRadar({
           <span />
         </div>
         <div className="frontier-radar__title">
-          <small>OPEN QUESTIONS INDEX · 已审核内容</small>
+          <small>FRONTIER SIGNALS INDEX · 已审核内容</small>
           <h2>前沿雷达</h2>
-          <p>沿着稳定知识坐标，观察各学科仍未定论的问题。</p>
+          <p>沿着稳定知识坐标，追踪未解问题与各路线最近的已解决突破。</p>
         </div>
         <button className="frontier-radar__close" onClick={onClose} aria-label="关闭前沿雷达">
           <X size={19} />
@@ -197,7 +218,11 @@ export function FrontierRadar({
       <div className="frontier-radar__scope">
         <span>
           <strong>{visibleEntries.length}</strong>
-          {activeKind === 'all' ? ' 条开放讨论' : ' 条记录'}
+          {activeKind === 'all'
+            ? ' 条开放讨论'
+            : activeKind === latestBreakthroughKind
+              ? ' 条最新进展'
+              : ' 条记录'}
         </span>
         <i />
         <span><strong>{conceptCount}</strong> 个知识锚点</span>
@@ -220,6 +245,19 @@ export function FrontierRadar({
         >
           全部
         </button>
+        {!!scopedLatestBreakthroughEntries.length && (
+          <button
+            className={activeKind === latestBreakthroughKind ? 'active' : ''}
+            style={{ '--kind-color': kindColors[latestBreakthroughKind] } as CSSProperties}
+            onClick={() => {
+              setActiveKind(latestBreakthroughKind)
+              setActiveDiscipline('all')
+              setActiveTag(null)
+            }}
+          >
+            最新进展
+          </button>
+        )}
         {availableKinds.map((kind) => (
           <button
             key={kind}
@@ -283,7 +321,10 @@ export function FrontierRadar({
       <div className="frontier-radar__timeline" aria-live="polite">
         {visibleEntries.length ? visibleEntries.map((entry) => {
           const sources = getFrontierSourcesForEntry(frontierCatalog, entry)
-          const accent = kindColors[entry.kind] ?? '#6d5842'
+          const isLatestBreakthrough = latestBreakthroughIds.has(entry.id)
+          const accent = isLatestBreakthrough
+            ? kindColors[latestBreakthroughKind]
+            : kindColors[entry.kind] ?? '#6d5842'
           return (
             <article
               className="frontier-entry"
@@ -296,9 +337,12 @@ export function FrontierRadar({
               </div>
               <div className="frontier-entry__body">
                 <div className="frontier-entry__meta">
-                  <span>
-                    {disciplineLabels[entry.discipline]} · {kindLabels[entry.kind] ?? entry.kind}
-                  </span>
+                  <div className="frontier-entry__classification">
+                    <span>
+                      {disciplineLabels[entry.discipline]} · {kindLabels[entry.kind] ?? entry.kind}
+                    </span>
+                    {isLatestBreakthrough && <em>最新进展</em>}
+                  </div>
                   <small><Clock3 size={11} /> 复核于 {entry.reviewedAt}</small>
                 </div>
                 <h3>{entry.title}</h3>

@@ -59,7 +59,7 @@ const computerScienceCatalog = buildCatalog([
   {
     id: 'programming-languages', title: '程序设计语言', englishTitle: 'Programming Languages',
     summary: '研究语法、语义、类型系统、求值策略与语言抽象机制。',
-    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics'], tags: ['编程', '形式语言', '抽象'], level: 3, strict: ['object-oriented-programming', 'functional-programming'], recommended: ['automata-formal-languages'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics'], tags: ['编程', '形式语言', '抽象'], level: 3, strict: ['programming-fundamentals'], recommended: ['object-oriented-programming', 'functional-programming', 'automata-formal-languages'],
   },
   {
     id: 'compiler-construction', title: '编译原理', englishTitle: 'Compiler Construction',
@@ -79,7 +79,7 @@ const computerScienceCatalog = buildCatalog([
   {
     id: 'human-computer-interaction', title: '人机交互', englishTitle: 'Human–Computer Interaction',
     summary: '研究交互设计、可用性、认知负荷与以用户为中心的评估方法。',
-    primaryDomain: 'computer-science', domains: ['computer-science', 'biology'], tags: ['交互', '设计', '实验方法'], level: 2, strict: ['software-engineering'], recommended: ['statistics', 'neuroscience'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'cognitive-science'], tags: ['交互', '设计', '实验方法'], level: 2, strict: ['software-engineering'], recommended: ['statistics', 'cognitive-science'],
   },
   {
     id: 'digital-logic-design', title: '数字逻辑与电路设计', englishTitle: 'Digital Logic & Circuit Design',
@@ -154,7 +154,7 @@ const computerScienceCatalog = buildCatalog([
   {
     id: 'knowledge-representation-reasoning', title: '知识表示与推理', englishTitle: 'Knowledge Representation & Reasoning',
     summary: '用逻辑、知识图谱和不确定推理表达世界并导出新结论。',
-    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics'], tags: ['智能', '知识', '推理'], level: 4, strict: ['artificial-intelligence'], recommended: ['mathematical-logic', 'graph-theory', 'probability'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics', 'cognitive-science'], tags: ['智能', '知识', '推理'], level: 4, strict: ['artificial-intelligence'], recommended: ['mathematical-logic', 'graph-theory', 'probability', 'reasoning-problem-solving'],
   },
   {
     id: 'machine-learning-systems', title: '机器学习系统', englishTitle: 'Machine Learning Systems',
@@ -169,22 +169,22 @@ const computerScienceCatalog = buildCatalog([
   {
     id: 'natural-language-processing', title: '自然语言处理', englishTitle: 'Natural Language Processing',
     summary: '让计算机分析、生成和交互使用人类语言。',
-    primaryDomain: 'computer-science', tags: ['智能', '语言', '数据'], level: 4, strict: ['artificial-intelligence'], recommended: ['deep-learning', 'automata-formal-languages', 'statistics'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'cognitive-science'], tags: ['智能', '语言', '数据'], level: 4, strict: ['artificial-intelligence'], recommended: ['deep-learning', 'automata-formal-languages', 'statistics', 'language-cognition'],
   },
   {
     id: 'computer-vision', title: '计算机视觉', englishTitle: 'Computer Vision',
     summary: '从图像与视频中恢复结构、识别对象并理解动态场景。',
-    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics', 'physics'], tags: ['智能', '成像', '数据'], level: 4, strict: ['artificial-intelligence'], recommended: ['deep-learning', 'linear-algebra', 'optics', 'probability'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics', 'physics', 'cognitive-science', 'neuroscience'], tags: ['智能', '成像', '数据'], level: 4, strict: ['artificial-intelligence'], recommended: ['deep-learning', 'linear-algebra', 'optics', 'probability', 'sensation-perception'],
   },
   {
     id: 'reinforcement-learning', title: '强化学习', englishTitle: 'Reinforcement Learning',
     summary: '研究智能体如何通过试错和延迟回报学习序贯决策策略。',
-    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics'], tags: ['智能', '决策', '不确定性'], level: 4, strict: ['machine-learning', 'artificial-intelligence'], recommended: ['probability', 'dynamical-systems', 'optimization'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics', 'cognitive-science'], tags: ['智能', '决策', '不确定性'], level: 4, strict: ['machine-learning', 'artificial-intelligence'], recommended: ['probability', 'dynamical-systems', 'optimization', 'judgment-decision-making'],
   },
   {
     id: 'multi-agent-systems', title: '多智能体系统', englishTitle: 'Multi-Agent Systems',
     summary: '研究多个自主智能体之间的协作、竞争、通信与集体行为。',
-    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics', 'biology'], tags: ['智能', '系统', '决策'], level: 4, strict: ['artificial-intelligence'], recommended: ['game-theory', 'reinforcement-learning'],
+    primaryDomain: 'computer-science', domains: ['computer-science', 'mathematics', 'biology', 'cognitive-science'], tags: ['智能', '系统', '决策'], level: 4, strict: ['artificial-intelligence'], recommended: ['game-theory', 'reinforcement-learning', 'social-cultural-cognition'],
   },
   {
     id: 'data-science', title: '数据科学', englishTitle: 'Data Science',

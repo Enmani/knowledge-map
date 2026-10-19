@@ -47,7 +47,7 @@ const earthEnvironmentalCatalog = buildCatalog([
     primaryDomain: 'earth-environmental', tags: ['深时', '地层', '证据'], level: 3, strict: ['sedimentology', 'geologic-time-earth-history'], recommended: ['earth-field-methods'],
   },
   {
-    id: 'structural-geology-tectonics', title: '构造地质学', englishTitle: 'Structural Geology & Tectonics',
+    id: 'structural-geology-tectonics', title: '构造地质与岩石变形', englishTitle: 'Structural Geology & Rock Deformation',
     summary: '研究岩石变形、断层、褶皱和区域构造所记录的应力与运动。',
     primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics'], tags: ['固体地球', '变形', '动力系统'], level: 2, importance: 1.15, strict: ['earth-system-science', 'classical-mechanics'], recommended: ['continuum-mechanics', 'earth-field-methods'],
   },
@@ -57,14 +57,24 @@ const earthEnvironmentalCatalog = buildCatalog([
     primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics'], tags: ['固体地球', '动力系统', '统一理论'], level: 3, importance: 1.3, strict: ['structural-geology-tectonics', 'earth-petrology'], recommended: ['geologic-time-earth-history'],
   },
   {
+    id: 'volcanology', title: '火山学', englishTitle: 'Volcanology',
+    summary: '研究岩浆的形成与上升、喷发动力、火山产物、监测证据及其对环境和灾害的影响。',
+    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics', 'chemistry'], tags: ['固体地球', '能量', '风险'], level: 3, importance: 1.15, strict: ['earth-petrology', 'plate-tectonics'], recommended: ['fluid-dynamics', 'earth-geochemistry', 'experimental-methods'],
+  },
+  {
     id: 'geomorphology', title: '地貌学', englishTitle: 'Geomorphology',
     summary: '研究构造、风化、侵蚀、搬运和沉积如何塑造并改变地表形态。',
     primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics'], tags: ['地表过程', '地形', '演化'], level: 3, importance: 1.1, strict: ['sedimentology', 'structural-geology-tectonics'], recommended: ['earth-observation-geospatial'],
   },
   {
-    id: 'paleontology-paleoecology', title: '古生物学与古生态学', englishTitle: 'Paleontology & Paleoecology',
-    summary: '利用化石和沉积环境证据重建古代生命、生态系统与环境变化。',
+    id: 'paleontology-paleoecology', title: '古生物学', englishTitle: 'Paleontology',
+    summary: '利用化石的形态、埋藏、年代与系统关系研究古代生命的多样性和演化。',
     primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'biology'], tags: ['深时', '生命', '演化'], level: 3, strict: ['geologic-time-earth-history', 'evolution'], recommended: ['stratigraphy', 'ecology'],
+  },
+  {
+    id: 'paleoecology', title: '古生态学', englishTitle: 'Paleoecology',
+    summary: '综合化石组合、沉积环境和地球化学代用指标重建古代群落、食物网与生态环境。',
+    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'biology', 'chemistry'], tags: ['深时', '生态', '证据'], level: 4, strict: ['paleontology-paleoecology', 'ecology'], recommended: ['stratigraphy', 'earth-geochemistry'],
   },
   {
     id: 'economic-geology-resources', title: '经济地质与矿产资源', englishTitle: 'Economic Geology & Mineral Resources',
@@ -92,9 +102,14 @@ const earthEnvironmentalCatalog = buildCatalog([
     primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics', 'chemistry'], tags: ['固体地球', '能量', '动力系统'], level: 4, importance: 1.2, strict: ['geophysics', 'earth-mineralogy', 'thermodynamics'], recommended: ['plate-tectonics', 'fluid-dynamics'],
   },
   {
-    id: 'geomagnetism-space-weather', title: '地磁学与空间天气', englishTitle: 'Geomagnetism & Space Weather',
-    summary: '研究地磁场的产生、长期变化及太阳活动与近地空间环境的耦合。',
-    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics'], tags: ['场', '行星', '观测'], level: 4, strict: ['geophysics', 'electromagnetism'], recommended: ['plasma-physics', 'earth-interior-dynamics'],
+    id: 'geomagnetism-space-weather', title: '地磁学与古地磁学', englishTitle: 'Geomagnetism & Paleomagnetism',
+    summary: '研究地磁场的产生和长期变化，以及岩石磁性记录如何保存板块运动与地球历史。',
+    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics'], tags: ['场', '深时', '观测'], level: 4, strict: ['geophysics', 'electromagnetism'], recommended: ['earth-interior-dynamics', 'earth-petrology'],
+  },
+  {
+    id: 'space-physics-space-weather', title: '空间物理与空间天气', englishTitle: 'Space Physics & Space Weather',
+    summary: '研究太阳风、磁层、电离层和近地等离子体的耦合，以及空间环境变化对技术系统的影响。',
+    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics'], tags: ['场', '等离子体', '风险'], level: 4, strict: ['electromagnetism', 'plasma-physics'], recommended: ['geomagnetism-space-weather', 'astrophysics', 'earth-observation-geospatial'],
   },
   {
     id: 'geodesy-gravity-field', title: '大地测量与重力场', englishTitle: 'Geodesy & Gravity Field',
@@ -219,7 +234,7 @@ const earthEnvironmentalCatalog = buildCatalog([
   {
     id: 'natural-hazards-disaster-risk', title: '自然灾害与灾害风险', englishTitle: 'Natural Hazards & Disaster Risk',
     summary: '综合致灾过程、暴露度、脆弱性和预警信息理解并降低复合灾害风险。',
-    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics', 'mathematics'], tags: ['灾害', '风险', '应用'], level: 4, importance: 1.2, strict: ['earth-observation-geospatial'], recommended: ['seismology', 'meteorology-weather', 'geomorphology', 'statistics'],
+    primaryDomain: 'earth-environmental', domains: ['earth-environmental', 'physics', 'mathematics'], tags: ['灾害', '风险', '应用'], level: 4, importance: 1.2, strict: ['earth-observation-geospatial'], recommended: ['seismology', 'volcanology', 'meteorology-weather', 'geomorphology', 'statistics'],
   },
   {
     id: 'sustainability-science', title: '可持续发展科学', englishTitle: 'Sustainability Science',

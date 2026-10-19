@@ -3,18 +3,12 @@ export type ScienceDomainId =
   | 'physics'
   | 'chemistry'
   | 'biology'
+  | 'neuroscience'
+  | 'cognitive-science'
   | 'computer-science'
   | 'earth-environmental'
 
-export type KnowledgeLensId =
-  | 'world'
-  | 'mathematics'
-  | 'physics'
-  | 'chemistry'
-  | 'biology'
-  | 'computer-science'
-  | 'earth-environmental'
-  | 'bridges'
+export type KnowledgeLensId = 'world' | ScienceDomainId | 'bridges'
 
 export type KnowledgeRelationType =
   | 'prerequisite'
@@ -37,6 +31,8 @@ export interface ScienceDomainDefinition {
 /** Stable public knowledge record. Lenses and user state may project it, but never mutate it. */
 export interface KnowledgeSpaceNode {
   id: string
+  /** A contextual projection may share content and progress with this canonical concept. */
+  canonicalConceptId?: string
   title: string
   englishTitle: string
   summary: string
@@ -75,6 +71,8 @@ export interface ProjectedKnowledgeNode {
   opacity: number
   scale: number
   emphasis: number
+  /** Strict-prerequisite successor coverage, distance-decayed and normalized to [0, 1]. */
+  foundationScore: number
   /** Longest strict-prerequisite depth, calibrated by the canonical level. */
   knowledgeDepth: number
   /** Stable foundation-to-specialization distance from the public-space center. */
@@ -127,11 +125,14 @@ export interface KnowledgeSpaceDataset {
   lenses: readonly KnowledgeLensDefinition[]
 }
 
+export type DomainFilterStrength = 'related' | 'inclusive' | 'exclusive'
+
 export interface ProjectionOptions {
   collisionPadding?: number
   relaxationIterations?: number
   sphere?: Partial<KnowledgeSphereParameters>
   domainFilter?: ScienceDomainId | null
+  domainFilterStrength?: DomainFilterStrength
   filterMode?: 'none' | 'temporary' | 'focus'
   focus?: KnowledgeSpaceFocus
 }

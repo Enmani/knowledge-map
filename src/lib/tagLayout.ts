@@ -424,7 +424,7 @@ export function buildTagLayout(
   const fields = fieldDefinitions
     .map((definition) => {
       const members = nodes.filter((node) => node.fieldTags.includes(definition.id))
-      if (members.length < 3) return null
+      if (members.length < (definition.minimumMembers ?? 3)) return null
       const points = members.map((node) => ({
         x: positions[node.id].x + nodeWidth / 2,
         y: positions[node.id].y + nodeHeight / 2,
@@ -476,6 +476,6 @@ function minimumSpanningTree(points: Point[]) {
   return links
 }
 
-export function fieldColor(tag: FieldTagId, fields: TagField[]) {
+export function fieldColor(tag: FieldTagId, fields: readonly TagField[]) {
   return fields.find((field) => field.id === tag)?.color ?? '#6d5842'
 }

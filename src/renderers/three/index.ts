@@ -5,12 +5,16 @@ export type {
   ThreeKnowledgeRendererCallbacks,
   ThreeKnowledgeRendererOptions,
   ThreeKnowledgeSubspace,
+  ThreeKnowledgeSubspaceField,
+  ThreeKnowledgeSubspaceFieldLobe,
   ThreeKnowledgeSubspaceNode,
 } from './types'
 export {
   SUBSPACE_SCOPE_ENTER_PROGRESS,
   SUBSPACE_SCOPE_EXIT_PROGRESS,
   createSubspaceRevealRange,
+  childFieldScopeWeight,
+  parentFieldScopeWeight,
   parentScopeWeight,
   subspaceCardCenter,
   subspaceEntryZoom,

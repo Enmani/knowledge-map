@@ -63,6 +63,24 @@ export function prepareFrontierEntries(entries: readonly FrontierEntry[]): Front
   return sortFrontierEntries(deduplicateFrontierEntries(entries))
 }
 
+export function getLatestBreakthroughEntries(
+  entries: readonly FrontierEntry[],
+): FrontierEntry[] {
+  const latestByTrack = new Map<string, FrontierEntry>()
+  const candidates = prepareFrontierEntries(entries.filter((entry) => (
+    isPublicFrontierEntry(entry) &&
+    entry.kind === 'historical-milestone' &&
+    Boolean(entry.breakthroughTrack?.trim())
+  )))
+
+  for (const entry of candidates) {
+    const track = entry.breakthroughTrack!.trim().toLocaleLowerCase('zh-CN')
+    if (!latestByTrack.has(track)) latestByTrack.set(track, entry)
+  }
+
+  return [...latestByTrack.values()]
+}
+
 function normalizedSet(values: readonly string[] | undefined): Set<string> | undefined {
   if (!values?.length) return undefined
   return new Set(values.map((value) => value.trim().toLocaleLowerCase('zh-CN')))
@@ -106,6 +124,7 @@ export function queryFrontierEntries(
       const searchable = [
         entry.title,
         entry.summary,
+        entry.breakthroughTrack ?? '',
         entry.award?.program ?? '',
         ...entry.tags,
         ...entry.relatedConceptIds,

@@ -9,7 +9,10 @@ const concepts: Concept[] = [...new Map(scenes.flatMap((scene) => scene.nodes).m
   title: node.title,
   summary: node.summary,
   tags: [...node.fieldTags, ...node.tags],
-  contentRef: node.id === 'calculus' ? 'content:calculus' : undefined,
+  contentRef: node.canonicalConceptId
+    ? `content:${node.canonicalConceptId}`
+    : node.id === 'calculus' ? 'content:calculus' : undefined,
+  metadata: node.canonicalConceptId ? { canonicalConceptId: node.canonicalConceptId } : undefined,
 } satisfies Concept])).values()]
 
 const spaces: KnowledgeSpace[] = scenes.map((scene) => ({
@@ -47,12 +50,20 @@ for (const scene of scenes) {
 }
 
 const localRelations: Relation[] = scenes.flatMap((scene) => scene.nodes.flatMap((node) => (
-  node.prerequisites.map((prerequisiteId) => ({
-    id: `${scene.id}:${prerequisiteId}>${node.id}`,
-    from: prerequisiteId,
-    to: node.id,
-    type: 'required' as const,
-  }))
+  [
+    ...node.prerequisites.map((prerequisiteId) => ({
+      id: `${scene.id}:${prerequisiteId}>${node.id}`,
+      from: prerequisiteId,
+      to: node.id,
+      type: 'required' as const,
+    })),
+    ...(node.recommendedPrerequisites ?? []).map((prerequisiteId) => ({
+      id: `${scene.id}:recommended:${prerequisiteId}>${node.id}`,
+      from: prerequisiteId,
+      to: node.id,
+      type: 'recommended' as const,
+    })),
+  ]
 )))
 
 const containmentRelations: Relation[] = scenes.flatMap((scene) => {

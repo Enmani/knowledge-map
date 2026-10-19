@@ -1,4 +1,4 @@
-import { buildCatalog } from './helpers'
+import { buildCatalog, defineEdge } from './helpers'
 
 const physicsCatalog = buildCatalog([
   {
@@ -197,13 +197,18 @@ const physicsCatalog = buildCatalog([
     primaryDomain: 'physics', tags: ['能量', '场', '跨学科'], level: 4, strict: ['plasma-physics', 'nuclear-physics', 'energy'], recommended: ['computational-physics'],
   },
   {
-    id: 'accelerator-detector-physics', title: '加速器与探测器物理', englishTitle: 'Accelerator & Detector Physics',
-    summary: '研究粒子束的产生、加速、聚焦以及辐射和粒子信号的测量。',
-    primaryDomain: 'physics', tags: ['测量', '场', '实验方法'], level: 4, strict: ['electromagnetism', 'relativity', 'experimental-methods'], recommended: ['particle-physics', 'nuclear-physics'],
+    id: 'accelerator-detector-physics', title: '加速器物理', englishTitle: 'Accelerator Physics',
+    summary: '研究带电粒子束的产生、加速、聚焦、传输与稳定性，以及粒子束和射频、电磁场的相互作用。',
+    primaryDomain: 'physics', tags: ['粒子束', '场', '实验方法'], level: 4, strict: ['electromagnetism', 'relativity'], recommended: ['experimental-methods', 'particle-physics', 'nuclear-physics'],
   },
   {
-    id: 'relativity', title: '相对论', englishTitle: 'Relativity',
-    summary: '研究时空、引力以及高速运动中的物理规律。',
+    id: 'particle-radiation-detection', title: '粒子与辐射探测', englishTitle: 'Particle & Radiation Detection',
+    summary: '研究辐射与物质的相互作用、传感介质、信号读出、事件重建以及探测器性能。',
+    primaryDomain: 'physics', domains: ['physics', 'chemistry'], tags: ['测量', '微观', '实验方法'], level: 4, strict: ['experimental-methods'], recommended: ['atomic-molecular-physics', 'nuclear-physics', 'particle-physics', 'semiconductor-physics', 'statistics'],
+  },
+  {
+    id: 'relativity', title: '狭义相对论与时空', englishTitle: 'Special Relativity & Spacetime',
+    summary: '研究惯性参考系、光速不变性、洛伦兹变换，以及高速运动中的时间、空间、能量和动量。',
     primaryDomain: 'physics', tags: ['时空', '几何'], level: 3, strict: ['classical-mechanics', 'calculus'],
   },
   {
@@ -233,5 +238,15 @@ const physicsCatalog = buildCatalog([
   },
 ] as const)
 
+const physicsSemanticEdges = [
+  defineEdge({
+    source: 'accelerator-detector-physics',
+    target: 'particle-radiation-detection',
+    type: 'application',
+    strength: 0.84,
+    label: '加速束流的实验测量',
+  }),
+] as const
+
 export const physicsNodes = physicsCatalog.nodes
-export const physicsEdges = physicsCatalog.edges
+export const physicsEdges = [...physicsCatalog.edges, ...physicsSemanticEdges] as const

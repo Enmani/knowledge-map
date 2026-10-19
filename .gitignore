@@ -11,3 +11,5 @@ coverage/
 .DS_Store
 Thumbs.db
 .gitnexus/
+.playwright-mcp/
+/arithmetic-3d-overview.png

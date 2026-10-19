@@ -1,5 +1,6 @@
 import { knowledgeSpaceEdges, knowledgeSpaceNodes, scienceDomains } from './data'
 import { knowledgeLenses } from './lenses'
+import { getDomainFilterNodeIds } from './domainFilter'
 import {
   buildSemanticKnowledgeLayout,
   poincareDistance,
@@ -23,14 +24,7 @@ import type {
   SpaceVector3,
 } from './types'
 
-export const SCIENCE_DOMAIN_ORDER: readonly ScienceDomainId[] = [
-  'mathematics',
-  'physics',
-  'chemistry',
-  'biology',
-  'computer-science',
-  'earth-environmental',
-]
+export const SCIENCE_DOMAIN_ORDER: readonly ScienceDomainId[] = scienceDomains.map(({ id }) => id)
 const DEFAULT_COLLISION_PADDING = 0.18
 const DEFAULT_RELAXATION_ITERATIONS = 32
 export const KNOWLEDGE_NODE_COLLISION_RADIUS = 0.78
@@ -238,7 +232,7 @@ const resolveFocusMembership = (
   focus: KnowledgeSpaceFocus | undefined,
 ): FocusMembership => {
   if (!focus) return emptyMembership(dataset)
-  const hasSelector = focus.domain || focus.tags?.length || focus.nodeIds?.length
+  const hasSelector = focus.domain || focus.tags?.length || focus.nodeIds !== undefined
   if (!hasSelector) return emptyMembership(dataset)
 
   const explicitIds = focus.nodeIds ? new Set(focus.nodeIds) : undefined
@@ -661,7 +655,9 @@ export const projectKnowledgeDataset = (
   const depths = computeKnowledgeDepths(dataset)
   const domainFocus: KnowledgeSpaceFocus | undefined = options.domainFilter && options.filterMode !== 'none'
     ? {
-        domain: options.domainFilter,
+        ...(options.filterMode === 'temporary'
+          ? { nodeIds: getDomainFilterNodeIds(dataset, options.domainFilter, options.domainFilterStrength ?? 'inclusive') }
+          : { domain: options.domainFilter }),
         includePrerequisites: options.filterMode === 'focus',
         includeBridges: options.filterMode === 'focus',
       }
@@ -690,7 +686,8 @@ export const projectKnowledgeDataset = (
   const crossDomainNodes = crossDomainIncidentNodes(dataset)
 
   const rawNodes = dataset.nodes.map((node): ProjectedKnowledgeNode => {
-    const radius = semanticLayout.nodeById.get(node.id)?.radius ?? sphere.outerRadius
+    const semanticNode = semanticLayout.nodeById.get(node.id)
+    const radius = semanticNode?.radius ?? sphere.outerRadius
     const direction = targetDirections.get(node.id) ?? globalDirections.get(node.id) ?? stableUnitVector(node.id)
     const visibility = projectionVisibility(node.id, effectiveFocus, membership)
     const visible = visibility !== 'hidden'
@@ -709,6 +706,7 @@ export const projectKnowledgeDataset = (
       opacity: temporaryFilter ? layoutVisual.opacity : visible ? focusVisual.opacity : 0,
       scale: temporaryFilter ? layoutVisual.scale : visible ? focusVisual.scale : 0.72,
       emphasis: temporaryFilter ? layoutVisual.emphasis : visible ? focusVisual.emphasis : 0,
+      foundationScore: semanticNode?.foundationScore ?? 0,
       knowledgeDepth: depths.depthById.get(node.id) ?? node.level,
       radius,
       visible: temporaryFilter ? true : visible,
@@ -868,6 +866,10 @@ export const validateKnowledgeSpaceDataset = (
     if (!node.domains.includes(node.primaryDomain)) errors.push(`Node ${node.id} primary domain is not in domains`)
     node.domains.forEach((domain) => { if (!domainIds.has(domain)) errors.push(`Node ${node.id} references unknown domain ${domain}`) })
     if (!node.title.trim() || !node.englishTitle.trim()) errors.push(`Node ${node.id} has an empty title`)
+    if (
+      node.importance !== undefined
+      && (!Number.isFinite(node.importance) || node.importance < 0)
+    ) errors.push(`Node ${node.id} importance must be a finite non-negative number`)
   })
   dataset.edges.forEach((edge) => {
     if (edgeIds.has(edge.id)) errors.push(`Duplicate edge id: ${edge.id}`)

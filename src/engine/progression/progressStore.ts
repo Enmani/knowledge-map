@@ -1,4 +1,5 @@
 import type { ConceptId, ProgressLevel, ProgressState } from '../../domain/knowledge'
+import { resolveCanonicalConceptId } from '../../domain/conceptIdentity'
 
 export type ProgressMode = 'exploration' | 'free'
 
@@ -22,9 +23,18 @@ export function createProgressStore(
   mode: ProgressMode = 'exploration',
   progress: Iterable<ProgressState> = [],
 ): ProgressStoreState {
+  const byConcept = new Map<ConceptId, ProgressState>()
+  for (const entry of progress) {
+    const conceptId = resolveCanonicalConceptId(entry.conceptId)
+    const normalized = { ...entry, conceptId }
+    const current = byConcept.get(conceptId)
+    if (!current || LEVEL_RANK[normalized.level] >= LEVEL_RANK[current.level]) {
+      byConcept.set(conceptId, normalized)
+    }
+  }
   return {
     mode,
-    byConcept: new Map([...progress].map((entry) => [entry.conceptId, entry])),
+    byConcept,
   }
 }
 
@@ -32,7 +42,8 @@ export function getConceptProgress(
   store: ProgressStoreState,
   conceptId: ConceptId,
 ): ProgressState {
-  return store.byConcept.get(conceptId) ?? { conceptId, level: 'unknown' }
+  const canonicalConceptId = resolveCanonicalConceptId(conceptId)
+  return store.byConcept.get(canonicalConceptId) ?? { conceptId: canonicalConceptId, level: 'unknown' }
 }
 
 export function setProgressMode(
@@ -49,12 +60,14 @@ export function advanceConceptProgress(
   level: ProgressLevel,
   updatedAt?: string,
 ): ProgressStoreState {
-  const current = getConceptProgress(store, conceptId)
+  const canonicalConceptId = resolveCanonicalConceptId(conceptId)
+  const current = getConceptProgress(store, canonicalConceptId)
   if (progressLevelAtLeast(current.level, level)) return store
 
   const byConcept = new Map(store.byConcept)
-  byConcept.set(conceptId, {
+  byConcept.set(canonicalConceptId, {
     ...current,
+    conceptId: canonicalConceptId,
     level,
     ...(updatedAt ? { updatedAt } : {}),
   })
@@ -67,7 +80,8 @@ export function completeInteraction(
   interactionId: string,
   updatedAt?: string,
 ): ProgressStoreState {
-  const current = getConceptProgress(store, conceptId)
+  const canonicalConceptId = resolveCanonicalConceptId(conceptId)
+  const current = getConceptProgress(store, canonicalConceptId)
   const completed = new Set(current.completedInteractionIds ?? [])
   const alreadyCompleted = completed.has(interactionId)
   completed.add(interactionId)
@@ -78,8 +92,9 @@ export function completeInteraction(
   if (alreadyCompleted && level === current.level) return store
 
   const byConcept = new Map(store.byConcept)
-  byConcept.set(conceptId, {
+  byConcept.set(canonicalConceptId, {
     ...current,
+    conceptId: canonicalConceptId,
     level,
     completedInteractionIds: [...completed],
     ...(updatedAt ? { updatedAt } : {}),

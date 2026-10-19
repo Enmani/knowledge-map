@@ -56,6 +56,7 @@ export interface FrontierEntry {
   reviewedAt: FrontierIsoDate
   reviewDue: FrontierIsoDate
   status: FrontierEntryStatus
+  breakthroughTrack?: string
   award?: FrontierAwardMetadata
 }
 
@@ -81,6 +82,7 @@ export type FrontierValidationCode =
   | 'award-metadata-required'
   | 'award-cycle-required'
   | 'invalid-award-cycle'
+  | 'invalid-breakthrough-track-kind'
 
 export interface FrontierValidationIssue {
   code: FrontierValidationCode

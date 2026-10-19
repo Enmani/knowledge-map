@@ -6,6 +6,7 @@ import type {
 
 export interface NodeInput {
   id: string
+  canonicalConceptId?: string
   title: string
   englishTitle: string
   summary: string

@@ -3,6 +3,7 @@ export {
   compareFrontierEntries,
   deduplicateFrontierEntries,
   getFrontierEntriesDueForReview,
+  getLatestBreakthroughEntries,
   getFrontierEntryById,
   getFrontierEntryBySlug,
   getFrontierSourceById,

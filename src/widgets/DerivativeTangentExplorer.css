@@ -234,6 +234,49 @@
   cursor: pointer;
 }
 
+.space-theme--dark .derivative-explorer {
+  --explorer-ink: #e7e1d8;
+  --explorer-muted: #aaa399;
+  --explorer-paper: #252524;
+  --explorer-border: rgba(232, 225, 213, 0.14);
+  --explorer-curve: #79a6d1;
+  --explorer-tangent: #78b9a8;
+  --explorer-secant: #d39060;
+}
+
+.space-theme--dark .derivative-explorer__graph,
+.space-theme--dark .derivative-explorer__footer button {
+  color: var(--explorer-ink);
+  background: #202020;
+  border-color: var(--explorer-border);
+}
+
+.space-theme--dark .derivative-explorer__grid line {
+  stroke: rgba(232, 225, 213, 0.08);
+}
+
+.space-theme--dark .derivative-explorer__axes line {
+  stroke: rgba(232, 225, 213, 0.34);
+}
+
+.space-theme--dark .derivative-explorer__axes text {
+  fill: var(--explorer-muted);
+}
+
+.space-theme--dark .derivative-explorer__point,
+.space-theme--dark .derivative-explorer__second-point {
+  stroke: #202020;
+}
+
+.space-theme--dark .derivative-explorer__readout div {
+  background: #30302f;
+}
+
+.space-theme--dark .derivative-explorer__complete {
+  color: #b7dfd4;
+  background: rgba(42, 117, 98, 0.25);
+}
+
 @media (max-width: 560px) {
   .derivative-explorer {
     padding: 14px;

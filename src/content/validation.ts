@@ -32,9 +32,20 @@ export function validateKnowledgeContent(content: KnowledgeCardContent): Content
     issues.push({ code: 'empty-summary', message: `内容“${content.id}”缺少摘要。` })
   }
 
-  const duplicateStoryId = findDuplicate(content.storyParagraphs.map((paragraph) => paragraph.id))
-  if (duplicateStoryId) {
-    issues.push({ code: 'duplicate-story-id', message: `故事段落 ID“${duplicateStoryId}”重复。` })
+  const duplicateSectionId = findDuplicate(content.sections.map((section) => section.id))
+  if (duplicateSectionId) {
+    issues.push({ code: 'duplicate-section-id', message: `文章区段 ID“${duplicateSectionId}”重复。` })
+  }
+  for (const section of content.sections) {
+    if (!section.id.trim() || !section.title.trim() || section.paragraphs.some((paragraph) => !paragraph.trim())) {
+      issues.push({ code: 'empty-section', message: `内容“${content.id}”包含空的文章区段、标题或段落。` })
+    }
+  }
+  const duplicateFormulaId = findDuplicate(content.sections.flatMap((section) => (
+    section.formulas?.map((formula) => formula.id) ?? []
+  )))
+  if (duplicateFormulaId) {
+    issues.push({ code: 'duplicate-formula-id', message: `公式 ID“${duplicateFormulaId}”重复。` })
   }
   const duplicateSourceId = findDuplicate(content.sources.map((source) => source.id))
   if (duplicateSourceId) {

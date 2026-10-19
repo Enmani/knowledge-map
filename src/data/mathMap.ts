@@ -19,6 +19,11 @@ export type FieldTagId =
   | '数据推断'
   | '数学建模'
   | '最优化'
+  | '直观基础'
+  | '方程计算'
+  | '空间结构'
+  | '几何与谱'
+  | '进阶工具'
 
 export type MathNode = {
   id: string
@@ -31,6 +36,8 @@ export type MathNode = {
   summary: string
   why: string
   prerequisites: string[]
+  recommendedPrerequisites?: string[]
+  canonicalConceptId?: string
   fieldTags: FieldTagId[]
   tags: string[]
   hours: number
@@ -40,6 +47,7 @@ export type TagField = {
   id: FieldTagId
   color: string
   description: string
+  minimumMembers?: number
 }
 
 export type Domain = {
@@ -98,12 +106,16 @@ export const mathNodes: MathNode[] = [
     summary: '从输入到输出的结构，包括单射、满射与复合。', why: '连接代数、几何、分析和概率的枢纽。', prerequisites: ['numbers', 'sets'], fieldTags: ['基础语言', '抽象结构', '连续变化'], tags: ['函数', '映射', '复合'], hours: 24,
   },
   {
+    id: 'vectors-coordinates', title: '向量与坐标', english: 'Vectors & Coordinates', domain: 'foundation', level: 1, x: 690, y: 940,
+    summary: '用有序分量表示具有多个方向或属性的量，并通过加法和数乘组合变化。', why: '它是线性代数、解析几何、力学、向量微积分和计算机图形学的共同入口。', prerequisites: ['numbers'], fieldTags: ['基础语言', '空间形态'], tags: ['向量', '坐标', '分量', '方向', '数乘'], hours: 10,
+  },
+  {
     id: 'elementary-algebra', title: '初等代数', english: 'Elementary Algebra', domain: 'algebra', level: 1, x: 890, y: 190,
     summary: '方程、不等式、多项式与代数式变形。', why: '学习抽象结构和连续变化前的计算语言。', prerequisites: ['numbers', 'functions'], fieldTags: ['计算方法', '抽象结构'], tags: ['方程', '多项式', '不等式'], hours: 45,
   },
   {
     id: 'linear-algebra', title: '线性代数', english: 'Linear Algebra', domain: 'algebra', level: 2, x: 1270, y: 80,
-    summary: '向量、矩阵、线性映射、特征值与向量空间。', why: '机器学习、优化、几何和微分方程的基础设施。', prerequisites: ['elementary-algebra', 'proof'], fieldTags: ['抽象结构', '空间形态', '计算方法'], tags: ['矩阵', '向量空间', '特征值'], hours: 70,
+    summary: '从向量、矩阵和线性方程组出发，逐步研究空间、变换、正交、特征值与分解。', why: '机器学习、优化、几何和微分方程的基础设施。', prerequisites: ['elementary-algebra', 'vectors-coordinates'], recommendedPrerequisites: ['proof'], fieldTags: ['抽象结构', '空间形态', '计算方法'], tags: ['矩阵', '向量空间', '特征值'], hours: 90,
   },
   {
     id: 'number-theory', title: '初等数论', english: 'Number Theory', domain: 'algebra', level: 2, x: 1260, y: 360,
@@ -135,7 +147,7 @@ export const mathNodes: MathNode[] = [
   },
   {
     id: 'vector-geometry', title: '向量几何', english: 'Vector Geometry', domain: 'geometry', level: 2, x: 1610, y: 790,
-    summary: '内积、外积、投影与空间变换。', why: '连接线性代数、三维几何和物理。', prerequisites: ['linear-algebra', 'analytic-geometry'], fieldTags: ['空间形态', '抽象结构'], tags: ['向量', '投影', '变换'], hours: 38,
+    summary: '以内积、外积、投影和空间变换研究向量之间的几何关系。', why: '连接线性代数、三维几何和物理。', prerequisites: ['vectors-coordinates', 'analytic-geometry'], recommendedPrerequisites: ['linear-algebra'], fieldTags: ['空间形态', '抽象结构'], tags: ['向量', '投影', '外积', '变换'], hours: 38,
   },
   {
     id: 'topology', title: '点集拓扑', english: 'Topology', domain: 'geometry', level: 3, x: 1990, y: 600,

@@ -95,7 +95,7 @@ for (const scene of Object.values(sceneCatalog)) {
 assert(sceneCatalog.root.layoutStrategy === 'radial-clusters', '数学全景应使用中心向外发散的领域簇布局。')
 assert(sceneCatalog.root.nodeGap === 24, '数学全景节点应保留 24 个世界单位的安全间距。')
 assert(sceneCatalog.root.initialNodeId === 'numbers', '数学全景应从中心基础节点开始。')
-assert(sceneCatalog.root.nodes.length === 46, '数学全景应包含补充后的 46 个主节点。')
+assert(sceneCatalog.root.nodes.length === 47, '数学全景应包含补充后的 47 个主节点。')
 for (const nodeId of [
   'category-theory',
   'theory-of-computation',
@@ -110,6 +110,7 @@ for (const nodeId of [
 }
 const childSceneExpectations = new Map([
   ['calculus', 'calculus-limit'],
+  ['linear-algebra', 'linear-algebra:vectors-coordinates'],
   ['precalculus', 'trigonometry'],
   ['multivariable', 'vector-calculus'],
   ['calculus-multivariable', 'vector-calculus'],
@@ -126,7 +127,7 @@ const childSceneExpectations = new Map([
   ['calculus-of-variations', 'euler-lagrange-equations'],
   ['numerical-analysis', 'numerical-linear-algebra'],
 ])
-assert(getChildScenes('root').length === 15, '数学全景应公开 15 个可连续钻取的子空间。')
+assert(getChildScenes('root').length === 16, '数学全景应公开 16 个可连续钻取的子空间。')
 assert(getChildScenes('calculus').length === 1, '微积分子空间中的多元微积分应继续公开向量微积分子空间。')
 for (const [sceneId, nodeId] of childSceneExpectations) {
   const scene = sceneCatalog[sceneId as keyof typeof sceneCatalog]
@@ -152,6 +153,58 @@ for (const [sceneId, expectedCount] of Object.entries({
     `分析专题子场景 ${sceneId} 的节点数量应为 ${expectedCount}。`,
   )
 }
+const expectedLinearAlgebraNodeIds = [
+  'vectors-coordinates',
+  'linear-combinations-span',
+  'matrix-basics-operations',
+  'linear-systems-elimination',
+  'linear-maps-matrix-representations',
+  'vector-spaces-bases',
+  'fundamental-subspaces-rank',
+  'determinants-invertibility',
+  'inner-products-orthogonality-projections',
+  'least-squares-qr',
+  'eigenvalues-diagonalization',
+  'normal-symmetric-definite-matrices',
+  'matrix-factorizations',
+  'singular-values-low-rank',
+  'pseudoinverse-minimum-norm',
+  'normal-unitary-matrices',
+  'jordan-generalized-eigenvectors',
+  'matrix-properties-atlas',
+].map((nodeId) => `linear-algebra:${nodeId}`)
+assert(
+  sceneCatalog['linear-algebra'].nodes.map((node) => node.id).join('|')
+    === expectedLinearAlgebraNodeIds.join('|'),
+  '二维线性代数子域必须提供十八个按学习阶段排列的内部节点。',
+)
+assert(
+  sceneCatalog['linear-algebra'].parentSceneId === 'root'
+    && sceneCatalog['linear-algebra'].ownerNodeId === 'linear-algebra'
+    && sceneCatalog['linear-algebra'].initialNodeId === 'linear-algebra:vectors-coordinates',
+  '二维线性代数子域必须锚定公共父节点，并从共享的向量与坐标投影开始。',
+)
+assert(
+  sceneCatalog['linear-algebra'].fieldDefinitions.map(({ id }) => id).join('|')
+    === '直观基础|方程计算|空间结构|几何与谱|进阶工具',
+  '线性代数子域必须公开五个循序渐进的学习场域。',
+)
+assert(
+  sceneCatalog['linear-algebra'].layout.fields.map(({ id }) => id).join('|')
+    === '直观基础|方程计算|空间结构|几何与谱|进阶工具',
+  '五个线性代数学习场域都必须生成可见布局，双节点阶段不能被通用阈值省略。',
+)
+assert(
+  sceneCatalog.root.nodeIndex['vectors-coordinates']?.prerequisites.join('|') === 'numbers'
+    && sceneCatalog.root.nodeIndex['linear-algebra']?.prerequisites.includes('vectors-coordinates')
+    && sceneCatalog.root.nodeIndex['linear-algebra']?.recommendedPrerequisites?.includes('proof'),
+  '公共向量节点必须位于线性代数之前，证明方法只能作为建议前置。',
+)
+assert(
+  sceneCatalog['linear-algebra'].nodeIndex['linear-algebra:vectors-coordinates']?.canonicalConceptId
+    === 'vectors-coordinates',
+  '线性代数向量入口必须声明公共向量概念为唯一内容与进度宿主。',
+)
 const complexDynamicsPlacements = knowledgeAtlas.placements.filter((placement) => placement.conceptId === 'complex-dynamics')
 assert(complexDynamicsPlacements.length === 2, '复动力系统应在复分析与动力系统中各有一个共享投影。')
 assert(

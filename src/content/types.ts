@@ -11,9 +11,30 @@ export type FrontierStatus =
 
 export type SourceKind = 'textbook' | 'paper' | 'institution' | 'archive'
 
-export interface StoryParagraph {
+export type KnowledgeArticleVisualKind =
+  | 'calculus-change-and-accumulation'
+  | 'matrix-world'
+
+export interface KnowledgeArticleFormula {
   id: string
-  text: string
+  expression: string
+  explanation?: string
+}
+
+export interface KnowledgeArticleVisual {
+  id: string
+  kind: KnowledgeArticleVisualKind
+  title: string
+  description: string
+  caption: string
+}
+
+export interface KnowledgeArticleSection {
+  id: string
+  title: string
+  paragraphs: readonly string[]
+  formulas?: readonly KnowledgeArticleFormula[]
+  visual?: KnowledgeArticleVisual
 }
 
 export interface ContentSource {
@@ -33,7 +54,7 @@ export interface KnowledgeCardContent {
   id: string
   conceptId: string
   summary: string
-  storyParagraphs: readonly StoryParagraph[]
+  sections: readonly KnowledgeArticleSection[]
   sources: readonly ContentSource[]
   frontierStatus: FrontierStatus
   reviewedAt: IsoDate
@@ -47,9 +68,11 @@ export interface ContentValidationIssue {
     | 'empty-summary'
     | 'duplicate-content-id'
     | 'duplicate-concept-id'
-    | 'duplicate-story-id'
+    | 'duplicate-section-id'
+    | 'duplicate-formula-id'
     | 'duplicate-source-id'
     | 'duplicate-widget-id'
+    | 'empty-section'
     | 'invalid-review-date'
     | 'invalid-review-order'
   message: string

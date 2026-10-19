@@ -33,6 +33,16 @@ export function parentScopeWeight(childProgress: number): number {
   return 1 - smoothstep(childProgress, 0.18, 1)
 }
 
+/** Ambient parent fields dissolve before cards so the camera appears to pass through the color volume. */
+export function parentFieldScopeWeight(childProgress: number): number {
+  return 1 - smoothstep(childProgress, 0.05, 0.72)
+}
+
+/** Child fields rise before the parent field is gone, avoiding a dark gap between semantic scales. */
+export function childFieldScopeWeight(childProgress: number): number {
+  return smoothstep(childProgress, 0.18, 0.82)
+}
+
 export function subspaceCardCenter(
   positions: readonly SpaceVector3[],
   fallback: SpaceVector3,

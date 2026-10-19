@@ -212,7 +212,9 @@ const spectralDirections = (dataset: KnowledgeSpaceDataset, affinity: Float64Arr
   ))
 }
 
-const foundationScores = (dataset: KnowledgeSpaceDataset) => {
+export const computeFoundationScores = (
+  dataset: Pick<KnowledgeSpaceDataset, 'nodes' | 'edges'>,
+): readonly number[] => {
   const indexById = new Map(dataset.nodes.map((node, index) => [node.id, index]))
   const outgoing = dataset.nodes.map(() => [] as number[])
   dataset.edges.forEach((edge) => {
@@ -278,7 +280,7 @@ const radialLayout = (
   sphere: KnowledgeSphereParameters,
   fallbackNodeIds: ReadonlySet<string>,
 ) => {
-  const foundation = foundationScores(dataset)
+  const foundation = computeFoundationScores(dataset)
   const progress = dataset.nodes.map((node, index) => {
     const normalizedDepth = clamp((depthById.get(node.id) ?? node.level) / Math.max(1, maxDepth), 0, 1)
     const semanticProgress = FOUNDATION_DEPTH_WEIGHT * normalizedDepth

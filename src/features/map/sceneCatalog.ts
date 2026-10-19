@@ -1,10 +1,15 @@
-import { mathNodes, tagFields, type MathNode } from '../../data/mathMap'
+import { mathNodes, tagFields, type MathNode, type TagField } from '../../data/mathMap'
 import { buildTagLayout, type TagLayout, type TagLayoutStrategy } from '../../lib/tagLayout'
 import { analysisSceneNodes } from './analysisSceneContent'
+import {
+  linearAlgebraLearningStageFields,
+  linearAlgebraSceneNodes,
+} from './linearAlgebraSceneContent'
 
 export type MapSceneId =
   | 'root'
   | 'calculus'
+  | 'linear-algebra'
   | 'precalculus'
   | 'multivariable'
   | 'calculus-multivariable'
@@ -46,13 +51,15 @@ export interface MapScene {
   nodeGap: number
   cardScale: number
   fieldScale: number
+  fieldDefinitions: readonly TagField[]
   layoutStrategy: TagLayoutStrategy
   layout: TagLayout
   initialNodeId: string
 }
 
-type MapSceneDefinition = Omit<MapScene, 'nodeIndex' | 'layout' | 'fieldScale' | 'layoutStrategy'> & {
+type MapSceneDefinition = Omit<MapScene, 'nodeIndex' | 'layout' | 'fieldScale' | 'fieldDefinitions' | 'layoutStrategy'> & {
   fieldScale?: number
+  fieldDefinitions?: readonly TagField[]
   layoutStrategy?: TagLayoutStrategy
 }
 
@@ -106,7 +113,10 @@ function validateDefinition(definition: MapSceneDefinition): string[] {
   }
 
   for (const node of definition.nodes) {
-    for (const prerequisiteId of node.prerequisites) {
+    for (const prerequisiteId of [
+      ...node.prerequisites,
+      ...(node.recommendedPrerequisites ?? []),
+    ]) {
       if (!nodeIds.has(prerequisiteId)) {
         issues.push(`场景“${definition.id}”中的节点“${node.id}”引用了场景外前置“${prerequisiteId}”。`)
       }
@@ -122,15 +132,17 @@ function createMapScene(definition: MapSceneDefinition): MapScene {
 
   const layoutStrategy = definition.layoutStrategy ?? (definition.parentSceneId ? 'progression' : 'radial-clusters')
   const fieldScale = definition.fieldScale ?? definition.cardScale
+  const fieldDefinitions = definition.fieldDefinitions ?? tagFields
 
   return {
     ...definition,
     fieldScale,
+    fieldDefinitions,
     layoutStrategy,
     nodeIndex: Object.fromEntries(definition.nodes.map((node) => [node.id, node])),
     layout: buildTagLayout(
       [...definition.nodes],
-      tagFields,
+      [...fieldDefinitions],
       definition.nodeWidth,
       definition.nodeHeight,
       definition.worldWidth,
@@ -237,6 +249,24 @@ const calculusScene = createMapScene({
   initialNodeId: 'calculus-limit',
 })
 
+const linearAlgebraScene = createMapScene({
+  id: 'linear-algebra',
+  title: '线性代数',
+  parentSceneId: 'root',
+  ownerNodeId: 'linear-algebra',
+  nodes: linearAlgebraSceneNodes,
+  worldWidth: 15600,
+  worldHeight: 4200,
+  embeddingReferenceWidth: 2800,
+  embeddingReferenceHeight: 1280,
+  nodeWidth: 1248,
+  nodeHeight: 576,
+  nodeGap: 220,
+  cardScale: 6,
+  fieldDefinitions: linearAlgebraLearningStageFields,
+  initialNodeId: 'linear-algebra:vectors-coordinates',
+})
+
 function createFocusedChildScene(
   id: FocusedChildSceneId,
   title: string,
@@ -309,6 +339,7 @@ const dynamicalSystemsScene = createAnalysisChildScene('dynamical-systems', '动
 export const sceneCatalog: Readonly<Record<MapSceneId, MapScene>> = {
   root: rootScene,
   calculus: calculusScene,
+  'linear-algebra': linearAlgebraScene,
   precalculus: precalculusScene,
   multivariable: multivariableScene,
   'calculus-multivariable': calculusMultivariableScene,

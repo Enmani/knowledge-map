@@ -37,14 +37,19 @@ const chemistryCatalog = buildCatalog([
     primaryDomain: 'chemistry', tags: ['数量', '守恒'], level: 1, strict: ['chemical-language'],
   },
   {
-    id: 'chemical-reactions-redox', title: '化学反应与氧化还原', englishTitle: 'Chemical Reactions & Redox',
-    summary: '用物质与电荷守恒描述化学转化、电子转移和反应方程。',
+    id: 'chemical-reactions-redox', title: '化学反应与守恒', englishTitle: 'Chemical Reactions & Conservation',
+    summary: '用原子、物质与电荷守恒表示化学转化，配平方程并区分主要反应类型。',
     primaryDomain: 'chemistry', domains: ['chemistry', 'biology'], tags: ['反应', '守恒'], level: 1, strict: ['stoichiometry', 'chemical-bonding'],
   },
   {
-    id: 'acids-bases-solutions', title: '酸碱与溶液', englishTitle: 'Acids, Bases & Solutions',
-    summary: '研究溶液组成、酸碱反应、pH、缓冲体系和溶剂效应。',
-    primaryDomain: 'chemistry', domains: ['chemistry', 'biology'], tags: ['反应', '系统'], level: 1, strict: ['stoichiometry', 'chemical-bonding'], recommended: ['matter-and-phases'],
+    id: 'solution-chemistry', title: '溶液化学', englishTitle: 'Solution Chemistry',
+    summary: '研究溶剂化、浓度、活度、离子强度和依数性如何共同决定均相体系的性质。',
+    primaryDomain: 'chemistry', domains: ['chemistry', 'physics', 'biology'], tags: ['物质', '系统', '相互作用'], level: 1, strict: ['stoichiometry', 'molecular-structure-intermolecular-forces'], recommended: ['matter-and-phases'],
+  },
+  {
+    id: 'acids-bases-solutions', title: '酸碱化学', englishTitle: 'Acid–Base Chemistry',
+    summary: '研究酸碱理论、质子转移、pH、缓冲、滴定以及溶剂环境对酸碱平衡的影响。',
+    primaryDomain: 'chemistry', domains: ['chemistry', 'biology'], tags: ['反应', '系统'], level: 2, strict: ['solution-chemistry', 'chemical-equilibrium'], recommended: ['chemical-bonding'],
   },
   {
     id: 'thermochemistry', title: '热化学', englishTitle: 'Thermochemistry',
@@ -54,7 +59,7 @@ const chemistryCatalog = buildCatalog([
   {
     id: 'chemical-equilibrium', title: '化学平衡', englishTitle: 'Chemical Equilibrium',
     summary: '研究可逆反应、平衡常数和外界条件对系统状态的影响。',
-    primaryDomain: 'chemistry', domains: ['chemistry', 'physics'], tags: ['系统', '动力系统'], level: 2, strict: ['stoichiometry', 'acids-bases-solutions'], recommended: ['thermochemistry'],
+    primaryDomain: 'chemistry', domains: ['chemistry', 'physics'], tags: ['系统', '动力系统'], level: 2, strict: ['stoichiometry', 'chemical-reactions-redox'], recommended: ['solution-chemistry', 'thermochemistry'],
   },
   {
     id: 'chemical-kinetics', title: '化学动力学', englishTitle: 'Chemical Kinetics',

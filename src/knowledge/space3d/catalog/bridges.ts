@@ -1,6 +1,9 @@
 import { defineEdge } from './helpers'
 
 export const crossDomainEdges = [
+  defineEdge({ source: 'vectors-coordinates', target: 'classical-mechanics', type: 'application', strength: 0.9, label: '位移与力的分解' }),
+  defineEdge({ source: 'vectors-coordinates', target: 'computer-graphics', type: 'application', strength: 0.9, label: '坐标与空间变换' }),
+  defineEdge({ source: 'vectors-coordinates', target: 'machine-learning', type: 'shared-model', strength: 0.88, label: '特征向量表示' }),
   defineEdge({ source: 'calculus', target: 'classical-mechanics', type: 'application', strength: 0.9, label: '运动变化率' }),
   defineEdge({ source: 'calculus-of-variations', target: 'analytical-mechanics', type: 'shared-model', strength: 0.92, label: '最小作用量' }),
   defineEdge({ source: 'differential-equations', target: 'waves-oscillations', type: 'application', strength: 0.9, label: '波动方程' }),
@@ -32,8 +35,8 @@ export const crossDomainEdges = [
   defineEdge({ source: 'biophysics', target: 'molecular-biophysics', type: 'shared-model', strength: 0.92, label: '生物大分子物理' }),
   defineEdge({ source: 'soft-matter-physics', target: 'biological-membranes-transport', type: 'shared-model', strength: 0.86, label: '膜与软物质' }),
   defineEdge({ source: 'nonequilibrium-statistical-physics', target: 'systems-biology', type: 'shared-model', strength: 0.92, label: '耗散生命系统' }),
-  defineEdge({ source: 'acoustics', target: 'neuroscience', type: 'application', strength: 0.72, label: '听觉编码' }),
-  defineEdge({ source: 'photonics-lasers', target: 'neuroscience', type: 'application', strength: 0.74, label: '光学成像与光遗传' }),
+  defineEdge({ source: 'acoustics', target: 'sensory-neuroscience', type: 'application', strength: 0.78, label: '听觉编码' }),
+  defineEdge({ source: 'photonics-lasers', target: 'neuroscience-research-methods', type: 'application', strength: 0.82, label: '神经成像与光学扰动' }),
   defineEdge({ source: 'fluid-dynamics', target: 'physiology', type: 'application', strength: 0.82, label: '血流与呼吸' }),
   defineEdge({ source: 'thermodynamics', target: 'physiology', type: 'application', strength: 0.72, label: '能量代谢与稳态' }),
   defineEdge({ source: 'electromagnetism', target: 'biological-membranes-transport', type: 'shared-model', strength: 0.8, label: '膜电位与离子通道' }),

@@ -2,6 +2,7 @@ import type {
   KnowledgeSpaceEdge,
   KnowledgeSpaceNode,
   KnowledgeSpaceProjection,
+  ScienceDomainId,
   SpaceVector3,
 } from '../../knowledge/space3d/types'
 import type { CardFocusState } from '../core/cardFocus'
@@ -19,12 +20,32 @@ export interface ThreeKnowledgeSubspaceNode {
   scale: number
 }
 
+export interface ThreeKnowledgeSubspaceFieldLobe {
+  nodeId: string
+  localPosition: SpaceVector3
+  radius: number
+  opacity: number
+}
+
+export interface ThreeKnowledgeSubspaceField {
+  id: string
+  kind: 'domain' | 'tag'
+  label: string
+  color: string
+  domainId?: ScienceDomainId
+  tag?: string
+  opacity: number
+  lobes: readonly ThreeKnowledgeSubspaceFieldLobe[]
+}
+
 export interface ThreeKnowledgeSubspace {
   id: string
   title: string
   ownerNodeId: string
   nodes: readonly ThreeKnowledgeSubspaceNode[]
   edges: readonly KnowledgeSpaceEdge[]
+  /** Optional for backward-compatible scene definitions; absent fields render as an empty local layer. */
+  fields?: readonly ThreeKnowledgeSubspaceField[]
   revealStartPx: number
   revealEndPx: number
   scopeEnterZoom: number
