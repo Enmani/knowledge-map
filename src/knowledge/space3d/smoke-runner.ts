@@ -1263,5 +1263,22 @@ assert(
     }),
   '最后互动卡片必须在小范围相机移动和缩放内保留，并在镜头走远后释放。',
 )
+for (const referenceZoom of [0.1, 0.7, 2, 10, 128]) {
+  const zoomFactor = 2 ** STABLE_LOD_INTERACTION_MAX_ZOOM_OCTAVES
+  const retainedAtZoom = (currentZoom: number) => stableLodInteractionRetained({
+    cameraTravel: 0,
+    lookAtTravel: 0,
+    referenceDistance: interactionReferenceDistance,
+    referenceZoom,
+    currentZoom,
+  })
+  assert(
+    retainedAtZoom(referenceZoom / zoomFactor)
+      && retainedAtZoom(referenceZoom * zoomFactor)
+      && !retainedAtZoom(referenceZoom / 2 ** 0.751)
+      && !retainedAtZoom(referenceZoom * 2 ** 0.751),
+    `最后互动卡片必须在参考倍率 ${referenceZoom} 的双向缩放边界保持，并在越界后释放。`,
+  )
+}
 
 console.log(`3D semantic knowledge layout smoke test passed: ${validation.stats.nodes} nodes, ${validation.stats.edges} edges, ${validation.stats.crossDomainNodes} cross-domain nodes, ${validation.stats.crossDomainEdges} cross-domain edges, ${world.fields.filter((field) => field.kind === 'tag').length} tag fields, ${world.fields.reduce((sum, field) => sum + field.lobes.length, 0)} field lobes; ${threeKnowledgeSubspaces.length} subspaces, ${threeKnowledgeSubspaces.reduce((sum, subspace) => sum + subspace.nodes.length, 0)} local nodes, ${threeKnowledgeSubspaces.reduce((sum, subspace) => sum + subspace.edges.length, 0)} local edges, ${threeKnowledgeSubspaces.reduce((sum, subspace) => sum + (subspace.fields?.length ?? 0), 0)} local fields; spans ${axisSpans.map((value) => value.toFixed(1)).join('×')}, collision gap ${minimumCollisionGap.toFixed(3)}.`)

@@ -163,9 +163,10 @@ export function stableLodInteractionRetained({
   const effectiveViewDistance = Math.max(1e-6, referenceDistance / safeReferenceZoom)
   const travelRatio = Math.max(Math.max(0, cameraTravel), Math.max(0, lookAtTravel))
     / effectiveViewDistance
-  const zoomOctaves = Math.abs(Math.log2(safeCurrentZoom / safeReferenceZoom))
+  const zoomFactor = 2 ** STABLE_LOD_INTERACTION_MAX_ZOOM_OCTAVES
   return travelRatio <= STABLE_LOD_INTERACTION_MAX_TRAVEL_RATIO
-    && zoomOctaves <= STABLE_LOD_INTERACTION_MAX_ZOOM_OCTAVES
+    && safeCurrentZoom >= safeReferenceZoom / zoomFactor
+    && safeCurrentZoom <= safeReferenceZoom * zoomFactor
 }
 
 export function stableHemisphereEligibility(
